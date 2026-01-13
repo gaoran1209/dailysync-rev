@@ -1,0 +1,31 @@
+name: Sync Garmin CN to Garmin Global (Account 2)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+env:
+  GARMIN_USERNAME: ${{ secrets.GARMIN_USERNAME_2 }}
+  GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD_2 }}
+  GARMIN_GLOBAL_USERNAME: ${{ secrets.GARMIN_GLOBAL_USERNAME_2 }}
+  GARMIN_GLOBAL_PASSWORD: ${{ secrets.GARMIN_GLOBAL_PASSWORD_2 }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Sync Garmin CN to Garmin Global (Account 2)
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'yarn'
+      - run: yarn
+      - run: yarn sync_cn
+        timeout-minutes: 5
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Save Garmin Session (Account 2)
