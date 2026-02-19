@@ -1,4 +1,4 @@
-name: MFA Login
+name: MFA Login (Account 2)
 
 on:
   workflow_dispatch:
@@ -9,8 +9,9 @@ on:
         type: string
 
 env:
-  GARMIN_USERNAME: ${{ secrets.GARMIN_USERNAME }}
-  GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+  # Account 2 需要 MFA 验证
+  GARMIN_USERNAME: ${{ secrets.GARMIN_USERNAME_2 }}
+  GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD_2 }}
   BARK_KEY: ${{ secrets.BARK_KEY }}
   MFA_CODE: ${{ github.event.inputs.mfa_code }}
 
