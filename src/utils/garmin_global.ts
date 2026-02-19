@@ -6,7 +6,7 @@ import {
 } from '../constant';
 import { getGaminCNClient } from './garmin_cn';
 import { GarminClientType } from './type';
-import { downloadGarminActivity, uploadGarminActivity } from './garmin_common';
+import { downloadGarminActivity, uploadGarminActivity, sendBarkNotification, refreshAndSaveToken } from './garmin_common';
 import { number2capital } from './number_tricks';
 const core = require('@actions/core');
 import _ from 'lodash';
@@ -27,28 +27,42 @@ export const getGaminGlobalClient = async (): Promise<GarminClientType> => {
         return Promise.reject(errMsg);
     }
 
-    const GCClient = new GarminConnect({username: GARMIN_GLOBAL_USERNAME, password: GARMIN_GLOBAL_PASSWORD});
+    const GCClient = new GarminConnect({ username: GARMIN_GLOBAL_USERNAME, password: GARMIN_GLOBAL_PASSWORD });
 
     try {
         await initDB();
 
         const currentSession = await getSessionFromDB('GLOBAL');
         if (!currentSession) {
-            await GCClient.login();
-            await saveSessionToDB('GLOBAL', GCClient.exportToken());
+            try {
+                await GCClient.login();
+                await saveSessionToDB('GLOBAL', GCClient.exportToken());
+            } catch (loginErr) {
+                const errMsg = `佳明国际区首次登录失败: ${loginErr.message}`;
+                console.error(errMsg);
+                await sendBarkNotification('Garmin Global 登录失败', errMsg);
+                core.setFailed(errMsg);
+                return Promise.reject(errMsg);
+            }
         } else {
             //  Wrap error message in GCClient, prevent terminate in github actions.
             try {
                 console.log('GarminGlobal: login by saved session');
                 await GCClient.loadToken(currentSession.oauth1, currentSession.oauth2);
             } catch (e) {
-                // 只在登录默认session登录失败，catch到登录错误，需要重新登录时注册sessionChange事件
+                // Token 失效：尝试重新登录（国际区通常不需要 MFA）
                 console.log('Warn: renew GarminGlobal session..');
-                await GCClient.login(GARMIN_GLOBAL_USERNAME, GARMIN_GLOBAL_PASSWORD);
-                await updateSessionToDB('GLOBAL', GCClient.sessionJson);
-
+                try {
+                    await GCClient.login(GARMIN_GLOBAL_USERNAME, GARMIN_GLOBAL_PASSWORD);
+                    await updateSessionToDB('GLOBAL', GCClient.exportToken());
+                } catch (loginErr) {
+                    const errMsg = `佳明国际区 Token 过期且重新登录失败: ${loginErr.message}`;
+                    console.error(errMsg);
+                    await sendBarkNotification('Garmin Global 登录失败', errMsg);
+                    core.setFailed(errMsg);
+                    return Promise.reject(errMsg);
+                }
             }
-
         }
         const userInfo = await GCClient.getUserProfile();
         const { fullName, userName: emailAddress, location } = userInfo;
@@ -56,6 +70,10 @@ export const getGaminGlobalClient = async (): Promise<GarminClientType> => {
             throw Error('佳明国际区登录失败，请检查填入的账号密码或您的网络环境')
         }
         console.log('Garmin userInfo global', { fullName, emailAddress, location });
+
+        // 每次成功获取用户信息后，刷新并保存最新 token
+        await refreshAndSaveToken(GCClient, 'GLOBAL');
+
         return GCClient;
     } catch (err) {
         console.error(err);

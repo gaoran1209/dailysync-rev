@@ -7,7 +7,7 @@ import {
     GARMIN_USERNAME_DEFAULT,
     GARMIN_SYNC_NUM_DEFAULT
 } from '../constant';
-import { downloadGarminActivity, uploadGarminActivity } from './garmin_common';
+import { downloadGarminActivity, uploadGarminActivity, sendBarkNotification, refreshAndSaveToken } from './garmin_common';
 import { GarminClientType } from './type';
 import { number2capital } from './number_tricks';
 const core = require('@actions/core');
@@ -32,26 +32,38 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
         return Promise.reject(errMsg);
     }
 
-    const GCClient = new GarminConnect({username: GARMIN_USERNAME, password: GARMIN_PASSWORD}, 'garmin.cn');
+    const GCClient = new GarminConnect({ username: GARMIN_USERNAME, password: GARMIN_PASSWORD }, 'garmin.cn');
 
     try {
         await initDB();
 
         const currentSession = await getSessionFromDB('CN');
         if (!currentSession) {
-            await GCClient.login();
-            await saveSessionToDB('CN', GCClient.exportToken());
+            // 首次登录：无 session，尝试直接登录
+            // 如果开启了 ECG/MFA，这里会失败，需要用 MFA 流程
+            try {
+                await GCClient.login();
+                await saveSessionToDB('CN', GCClient.exportToken());
+            } catch (loginErr) {
+                const errMsg = `佳明中国区首次登录失败，可能需要 MFA 验证。请在 GitHub Actions 中手动触发 Request MFA Code workflow。错误: ${loginErr.message}`;
+                console.error(errMsg);
+                await sendBarkNotification('Garmin CN 登录失败', '需要 MFA 验证，请手动触发 Request MFA Code workflow');
+                core.setFailed(errMsg);
+                return Promise.reject(errMsg);
+            }
         } else {
             //  Wrap error message in GCClient, prevent terminate in github actions.
             try {
                 console.log('GarminCN: login by saved session');
                 await GCClient.loadToken(currentSession.oauth1, currentSession.oauth2);
             } catch (e) {
-                console.log('Warn: renew  GarminCN Session..');
-                await GCClient.login(GARMIN_USERNAME, GARMIN_PASSWORD);
-                await updateSessionToDB('CN', GCClient.sessionJson);
+                // Token 失效：发送通知，不再直接 login（因为会触发 MFA）
+                const errMsg = `佳明中国区 Token 已过期，需要重新 MFA 登录。请在 GitHub Actions 中手动触发 Request MFA Code workflow。`;
+                console.error('Warn: GarminCN session expired:', e.message);
+                await sendBarkNotification('Garmin CN Token 过期', '请手动触发 Request MFA Code workflow 重新登录');
+                core.setFailed(errMsg);
+                return Promise.reject(errMsg);
             }
-
         }
 
         const userInfo = await GCClient.getUserProfile();
@@ -60,6 +72,9 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
             throw Error('佳明中国区登录失败')
         }
         console.log('Garmin userInfo CN: ', { fullName, emailAddress, location });
+
+        // 每次成功获取用户信息后，刷新并保存最新 token
+        await refreshAndSaveToken(GCClient, 'CN');
 
         return GCClient;
     } catch (err) {

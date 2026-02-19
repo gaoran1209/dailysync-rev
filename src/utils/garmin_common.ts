@@ -1,7 +1,9 @@
 import fs from 'fs';
 
 const core = require('@actions/core');
+const axios = require('axios');
 import {
+    BARK_KEY_DEFAULT,
     DOWNLOAD_DIR,
     FILE_SUFFIX,
     GARMIN_MIGRATE_NUM_DEFAULT,
@@ -12,9 +14,50 @@ import {
 } from '../constant';
 import { GarminClientType } from './type';
 import _ from 'lodash';
+import { updateSessionToDB, saveSessionToDB, getSessionFromDB } from './sqlite';
 const decompress = require('decompress');
 
 const unzipper = require('unzipper');
+
+const BARK_KEY = process.env.BARK_KEY ?? BARK_KEY_DEFAULT;
+
+/**
+ * 发送 Bark 推送通知
+ */
+export const sendBarkNotification = async (title: string, message: string): Promise<void> => {
+    if (!BARK_KEY) {
+        console.log(`[Bark] 未配置 BARK_KEY，跳过通知: ${title} - ${message}`);
+        return;
+    }
+    try {
+        await axios.get(`https://api.day.app/${BARK_KEY}/${encodeURIComponent(title)}/${encodeURIComponent(message)}`);
+        console.log(`[Bark] 通知已发送: ${title}`);
+    } catch (e) {
+        console.log(`[Bark] 通知发送失败: ${e.message}`);
+    }
+};
+
+/**
+ * 刷新并保存 Token 到数据库
+ * 每次成功 API 调用后应调用此函数，确保最新 token 被持久化
+ */
+export const refreshAndSaveToken = async (
+    client: GarminClientType,
+    region: 'CN' | 'GLOBAL',
+): Promise<void> => {
+    try {
+        const token = client.exportToken();
+        const existingSession = await getSessionFromDB(region);
+        if (existingSession) {
+            await updateSessionToDB(region, token);
+        } else {
+            await saveSessionToDB(region, token);
+        }
+        console.log(`[Token] ${region} token 已更新到数据库`);
+    } catch (e) {
+        console.log(`[Token] ${region} token 更新失败: ${e.message}`);
+    }
+};
 
 /**
  * 上传 .fit file

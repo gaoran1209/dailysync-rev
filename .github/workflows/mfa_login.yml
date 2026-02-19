@@ -1,0 +1,34 @@
+name: MFA Login
+
+on:
+  workflow_dispatch:
+    inputs:
+      mfa_code:
+        description: '邮箱中收到的佳明6位验证码'
+        required: true
+        type: string
+
+env:
+  GARMIN_USERNAME: ${{ secrets.GARMIN_USERNAME }}
+  GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+  BARK_KEY: ${{ secrets.BARK_KEY }}
+  MFA_CODE: ${{ github.event.inputs.mfa_code }}
+
+jobs:
+  mfa-login:
+    runs-on: ubuntu-latest
+    name: Complete MFA Login
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'yarn'
+      - run: yarn
+      - run: yarn mfa_login --code ${{ github.event.inputs.mfa_code }}
+        timeout-minutes: 2
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Save Garmin Session after MFA Login

@@ -1,0 +1,28 @@
+name: Request MFA Code
+
+on:
+  workflow_dispatch:
+
+env:
+  GARMIN_USERNAME: ${{ secrets.GARMIN_USERNAME }}
+  GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+  BARK_KEY: ${{ secrets.BARK_KEY }}
+
+jobs:
+  request-mfa:
+    runs-on: ubuntu-latest
+    name: Request Garmin CN MFA Code
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'yarn'
+      - run: yarn
+      - run: yarn request_mfa
+        timeout-minutes: 2
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Save MFA state
