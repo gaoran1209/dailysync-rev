@@ -20,6 +20,9 @@ export interface MfaState {
     csrf: string;
     cookies: string;
     timestamp: number;
+    username?: string;
+    fromPage?: string;
+    verifyPath?: string;
 }
 
 const SSO_BASE = 'https://sso.garmin.cn/sso';
@@ -73,17 +76,73 @@ function extractCsrf(html: string): string | null {
 /**
  * 从 HTML 或 URL 中提取 ServiceTicket
  */
-function extractTicket(html: string): string | null {
+function extractTicket(input: string): string | null {
+    if (!input) return null;
+
+    const directPatterns = [
+        /(?:[?&]|^)ticket=([^&"'\\s<>]+)/i,
+        /ServiceTicket=([^&"'\\s<>]+)/i,
+    ];
+    for (const pattern of directPatterns) {
+        const match = input.match(pattern);
+        if (match?.[1]) {
+            try {
+                return decodeURIComponent(match[1]);
+            } catch {
+                return match[1];
+            }
+        }
+    }
+
+    // 常见场景: HTML 中有 var response_url = "https://...?...&ticket=..."
+    const responseUrlMatch = input.match(/var\s+response_url\s*=\s*['"]([^'"]+)['"]/i);
+    if (responseUrlMatch?.[1]) {
+        const responseUrl = responseUrlMatch[1];
+        try {
+            const url = new URL(responseUrl);
+            const ticket = url.searchParams.get('ticket') || url.searchParams.get('ServiceTicket');
+            if (ticket) return ticket;
+        } catch {
+            const fallback = responseUrl.match(/(?:[?&]|^)ticket=([^&"'\\s<>]+)/i);
+            if (fallback?.[1]) return fallback[1];
+        }
+    }
+
+    return null;
+}
+
+function extractHiddenInputValue(html: string, inputName: string): string | null {
+    const escaped = inputName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const patterns = [
-        /ticket=([A-Z0-9-]+)/,
-        /ServiceTicket=([A-Z0-9-]+)/i,
-        /var\s+response_url\s*=\s*['"]([^'"]*ticket=[^'"]*)['"]/,
+        new RegExp(`<input[^>]*name="${escaped}"[^>]*value="([^"]+)"`, 'i'),
+        new RegExp(`<input[^>]*value="([^"]+)"[^>]*name="${escaped}"`, 'i'),
+        new RegExp(`<input[^>]*name='${escaped}'[^>]*value='([^']+)'`, 'i'),
+        new RegExp(`<input[^>]*value='([^']+)'[^>]*name='${escaped}'`, 'i'),
     ];
     for (const pattern of patterns) {
         const match = html.match(pattern);
-        if (match) return match[1];
+        if (match?.[1]) return match[1];
     }
     return null;
+}
+
+function extractVerifyPath(html: string): string | null {
+    const patterns = [
+        /<form[^>]*action="([^"]*verifyMFA[^"]*)"/i,
+        /<form[^>]*action='([^']*verifyMFA[^']*)'/i,
+    ];
+    for (const pattern of patterns) {
+        const match = html.match(pattern);
+        if (match?.[1]) return match[1];
+    }
+    return null;
+}
+
+function resolveVerifyUrl(pathOrUrl: string | undefined): string {
+    if (!pathOrUrl) return `${SSO_BASE}/verifyMFA/loginEnterMfaCode`;
+    if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) return pathOrUrl;
+    if (pathOrUrl.startsWith('/')) return `https://sso.garmin.cn${pathOrUrl}`;
+    return `${SSO_BASE}/${pathOrUrl}`;
 }
 
 /**
@@ -196,10 +255,16 @@ export async function requestMfaCode(username: string, password: string): Promis
 
     console.log('[MFA] ✅ 请检查邮箱获取验证码');
 
+    const fromPage = extractHiddenInputValue(responseHtml, 'fromPage') || 'loginEnterMfaCode';
+    const verifyPath = extractVerifyPath(responseHtml) || '/sso/verifyMFA/loginEnterMfaCode';
+
     return {
         csrf,
         cookies,
         timestamp: Date.now(),
+        username,
+        fromPage,
+        verifyPath,
     };
 }
 
@@ -218,13 +283,16 @@ export async function verifyMfaCode(code: string, state: MfaState): Promise<stri
         throw new Error('[MFA] 验证码已过期（超过30分钟），请重新请求');
     }
 
-    const verifyUrl = `${SSO_BASE}/verifyMFA/loginEnterMfaCode`;
+    const verifyUrl = resolveVerifyUrl(state.verifyPath);
+    const fromPage = state.fromPage || 'loginEnterMfaCode';
     const verifyResp = await axios.post(
         verifyUrl,
         qs.stringify({
             'mfa-code': code,
+            // 兼容不同页面字段命名
+            'mfaCode': code,
             '_csrf': state.csrf,
-            'fromPage': 'setupEnterMfaCode',
+            'fromPage': fromPage,
             'embed': 'true',
         }),
         {
@@ -233,7 +301,7 @@ export async function verifyMfaCode(code: string, state: MfaState): Promise<stri
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Cookie': state.cookies,
                 'Origin': 'https://sso.garmin.cn',
-                'Referer': `${SSO_BASE}/verifyMFA/loginEnterMfaCode`,
+                'Referer': verifyUrl,
             },
             maxRedirects: 0,
             validateStatus: (s: number) => s < 500,

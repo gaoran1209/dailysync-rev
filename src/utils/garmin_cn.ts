@@ -1,5 +1,5 @@
 import { getGaminGlobalClient } from './garmin_global';
-import { requestMfaCode, saveMfaState } from '../mfa/garmin_sso_mfa';
+import { requestMfaCode, saveMfaState, loadMfaState } from '../mfa/garmin_sso_mfa';
 import {
     AESKEY_DEFAULT,
     GARMIN_MIGRATE_NUM_DEFAULT,
@@ -26,6 +26,52 @@ const GARMIN_MIGRATE_NUM = process.env.GARMIN_MIGRATE_NUM ?? GARMIN_MIGRATE_NUM_
 const GARMIN_MIGRATE_START = process.env.GARMIN_MIGRATE_START ?? GARMIN_MIGRATE_START_DEFAULT;
 const GARMIN_SYNC_NUM = process.env.GARMIN_SYNC_NUM ?? GARMIN_SYNC_NUM_DEFAULT;
 
+/**
+ * 统一的 SSO 登录处理函数（只发一次登录请求，避免重复邮件）
+ * - MFA 账号：发送验证码邮件 + 保存 MFA state + Bark 通知
+ * - 非 MFA 账号：直接用 ticket 完成登录
+ */
+async function handleSsoLogin(username: string, password: string): Promise<void> {
+    try {
+        // 如果已有同账号且未过期的 MFA 状态，避免重复触发验证码邮件
+        try {
+            const existingState = loadMfaState();
+            if (existingState?.username && existingState.username === username) {
+                console.log('🔐 检测到已有未过期 MFA 请求，跳过重复发送验证码邮件');
+                const errMsg = '检测到已有未过期 MFA 验证码，请直接在 GitHub Actions 中触发 MFA Login workflow 完成登录';
+                core.setFailed(errMsg);
+                return;
+            }
+        } catch {
+            // 无状态或已过期，继续发起新的 MFA 请求
+        }
+
+        const mfaState = await requestMfaCode(username, password);
+        // MFA 账号：验证码邮件已发送
+        saveMfaState(mfaState);
+        console.log('🔐 MFA 验证码已发送，请检查邮箱');
+        await sendBarkNotification('Garmin MFA 验证码已发送', '请检查邮箱，然后在 GitHub Actions 中触发 MFA Login workflow');
+        const errMsg = '需要 MFA 验证，验证码已发送到邮箱，请在 GitHub Actions 中触发 MFA Login workflow';
+        core.setFailed(errMsg);
+    } catch (err) {
+        if (err.message?.startsWith('NO_MFA_NEEDED:')) {
+            // 非 MFA 账号：直接用 ticket 完成登录
+            const ticket = err.message.split(':')[1];
+            console.log('账号无需 MFA，直接完成登录...');
+            const { exchangeAndSaveToken } = require('../mfa/garmin_sso_mfa');
+            await exchangeAndSaveToken(ticket);
+            console.log('✅ 登录成功，Token 已保存');
+            await sendBarkNotification('Garmin CN 登录成功', '无需 MFA，已自动完成登录');
+            return;
+        }
+        // 真正的错误
+        console.error('❌ SSO 登录失败:', err.message);
+        await sendBarkNotification('Garmin SSO 登录失败', err.message);
+        core.setFailed(err.message);
+        throw err;
+    }
+}
+
 export const getGaminCNClient = async (): Promise<GarminClientType> => {
     if (_.isEmpty(GARMIN_USERNAME) || _.isEmpty(GARMIN_PASSWORD)) {
         const errMsg = '请填写中国区用户名及密码：GARMIN_USERNAME,GARMIN_PASSWORD';
@@ -40,70 +86,20 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
 
         const currentSession = await getSessionFromDB('CN');
         if (!currentSession) {
-            // 首次登录：无 session，尝试直接登录
-            // 如果开启了 ECG/MFA，这里会失败，需要用 MFA 流程
-            try {
-                await GCClient.login();
-                await saveSessionToDB('CN', GCClient.exportToken());
-            } catch (loginErr) {
-                // 登录失败（MFA 账号），自动请求验证码
-                console.log('🔐 首次登录失败，需要 MFA 验证，自动请求验证码...');
-                try {
-                    const mfaState = await requestMfaCode(GARMIN_USERNAME, GARMIN_PASSWORD);
-                    saveMfaState(mfaState);
-                    await sendBarkNotification('Garmin MFA 验证码已发送', '请检查邮箱，然后在 GitHub Actions 中触发 MFA Login workflow');
-                } catch (mfaErr) {
-                    if (mfaErr.message?.startsWith('NO_MFA_NEEDED:')) {
-                        const ticket = mfaErr.message.split(':')[1];
-                        console.log('账号无需 MFA，直接完成登录...');
-                        const { exchangeAndSaveToken } = require('../mfa/garmin_sso_mfa');
-                        await exchangeAndSaveToken(ticket);
-                        console.log('✅ 登录成功，Token 已保存');
-                        await sendBarkNotification('Garmin CN 登录成功', '无需 MFA，已自动完成登录');
-                        return getGaminCNClient(); // 重新获取 client
-                    }
-                    await sendBarkNotification('Garmin MFA 请求失败', mfaErr.message);
-                }
-                const errMsg = '需要 MFA 验证，验证码已发送到邮箱，请在 GitHub Actions 中触发 MFA Login workflow';
-                core.setFailed(errMsg);
-                return Promise.reject(errMsg);
-            }
+            // 首次登录：无 session，通过 SSO 流程登录（兼容 MFA 和非 MFA 账号）
+            console.log('GarminCN: 无已保存的 session，开始 SSO 登录...');
+            await handleSsoLogin(GARMIN_USERNAME, GARMIN_PASSWORD);
+            return Promise.reject('SSO 登录流程已触发');
         } else {
-            //  Wrap error message in GCClient, prevent terminate in github actions.
+            // 尝试用已保存的 session 登录
             try {
                 console.log('GarminCN: login by saved session');
                 await GCClient.loadToken(currentSession.oauth1, currentSession.oauth2);
             } catch (e) {
-                // Token 失效：先尝试重新登录（非 MFA 账号可以直接成功）
-                console.log('Warn: GarminCN session expired, trying re-login...');
-                try {
-                    await GCClient.login(GARMIN_USERNAME, GARMIN_PASSWORD);
-                    const newToken = GCClient.exportToken();
-                    await updateSessionToDB('CN', newToken);
-                    console.log('GarminCN: re-login 成功，Token 已更新');
-                } catch (loginErr) {
-                    // re-login 也失败（MFA 账号），自动请求验证码
-                    console.log('🔐 Token 过期且重新登录失败，需要 MFA 验证，自动请求验证码...');
-                    try {
-                        const mfaState = await requestMfaCode(GARMIN_USERNAME, GARMIN_PASSWORD);
-                        saveMfaState(mfaState);
-                        await sendBarkNotification('Garmin MFA 验证码已发送', '请检查邮箱，然后在 GitHub Actions 中触发 MFA Login workflow');
-                    } catch (mfaErr) {
-                        if (mfaErr.message?.startsWith('NO_MFA_NEEDED:')) {
-                            const ticket = mfaErr.message.split(':')[1];
-                            console.log('账号无需 MFA，直接完成登录...');
-                            const { exchangeAndSaveToken } = require('../mfa/garmin_sso_mfa');
-                            await exchangeAndSaveToken(ticket);
-                            console.log('✅ 登录成功，Token 已保存');
-                            await sendBarkNotification('Garmin CN 登录成功', '无需 MFA，已自动完成登录');
-                            return getGaminCNClient(); // 重新获取 client
-                        }
-                        await sendBarkNotification('Garmin MFA 请求失败', mfaErr.message);
-                    }
-                    const errMsg = '需要 MFA 验证，验证码已发送到邮箱，请在 GitHub Actions 中触发 MFA Login workflow';
-                    core.setFailed(errMsg);
-                    return Promise.reject(errMsg);
-                }
+                // Token 失效，通过 SSO 流程重新登录（只发一次请求，避免重复邮件）
+                console.log('Warn: GarminCN session expired, 通过 SSO 流程重新登录...');
+                await handleSsoLogin(GARMIN_USERNAME, GARMIN_PASSWORD);
+                return Promise.reject('SSO 登录流程已触发');
             }
         }
 
