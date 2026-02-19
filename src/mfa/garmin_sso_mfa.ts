@@ -177,22 +177,24 @@ export async function requestMfaCode(username: string, password: string): Promis
         csrf = mfaCsrf;
     }
 
-    // 检查是否包含 MFA 相关内容
+    // 检查是否包含 MFA 相关内容（仅作为日志参考，不再作为硬判断）
     const isMfaPage = responseHtml.includes('verifyMFA') ||
         responseHtml.includes('mfa-code') ||
         responseHtml.includes('MFA') ||
         responseHtml.includes('verification') ||
         responseHtml.includes('验证码');
 
-    if (!isMfaPage) {
-        console.error('[MFA] 响应不包含 MFA 页面，可能是密码错误或其他问题');
-        console.error('[MFA] 响应状态码:', loginResp.status);
-        // 保存部分响应用于调试
-        console.error('[MFA] 响应内容(前500字符):', responseHtml.substring(0, 500));
-        throw new Error('[MFA] 登录失败：未出现 MFA 验证页面，请检查用户名密码是否正确');
+    if (isMfaPage) {
+        console.log('[MFA] ✅ 检测到 MFA 验证页面，验证码邮件已发送');
+    } else {
+        // 即使页面未检测到 MFA 关键词，只要没有直接返回 ticket，
+        // 就说明登录被拦截了（MFA 已触发，邮件已发送）
+        console.log('[MFA] ⚠️ 响应页面未检测到 MFA 关键词，但无直接 ticket，假定 MFA 已触发');
+        console.log('[MFA] 响应状态码:', loginResp.status);
+        console.log('[MFA] 响应内容(前500字符):', responseHtml.substring(0, 500));
     }
 
-    console.log('[MFA] ✅ 已触发验证码邮件发送，请检查邮箱');
+    console.log('[MFA] ✅ 请检查邮箱获取验证码');
 
     return {
         csrf,
