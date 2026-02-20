@@ -493,15 +493,32 @@ export function loadMfaState(): MfaState {
         throw new Error('[MFA] 未找到 MFA 状态文件，请先运行 request_mfa');
     }
     const data = fs.readFileSync(statePath, 'utf-8');
-    const state = JSON.parse(data) as MfaState;
+    const state = JSON.parse(data) as MfaState & { timestamp: number | string };
 
-    // 检查是否过期
-    const elapsed = Date.now() - state.timestamp;
-    if (elapsed > 30 * 60 * 1000) {
-        throw new Error('[MFA] MFA 状态已过期（超过30分钟），请重新运行 request_mfa');
+    const rawTimestamp = Number(state.timestamp);
+    if (!Number.isFinite(rawTimestamp) || rawTimestamp <= 0) {
+        throw new Error('[MFA] MFA 状态时间戳无效，请重新运行 request_mfa');
     }
 
-    return state;
+    // 兼容历史格式（秒级时间戳）与当前格式（毫秒时间戳）
+    const normalizedTimestamp = rawTimestamp < 1e12 ? rawTimestamp * 1000 : rawTimestamp;
+    const now = Date.now();
+    const elapsed = now - normalizedTimestamp;
+    const elapsedMinutes = Math.floor(elapsed / 60000);
+    console.log(
+        `[MFA] 状态时间: ${new Date(normalizedTimestamp).toISOString()}, 当前时间: ${new Date(now).toISOString()}, 已过去约 ${elapsedMinutes} 分钟`,
+    );
+
+    // 允许少量调度/队列延迟，防止边界误判
+    const EXPIRY_MS = 35 * 60 * 1000;
+    if (elapsed > EXPIRY_MS) {
+        throw new Error('[MFA] MFA 状态已过期（超过35分钟），请重新运行 request_mfa');
+    }
+
+    return {
+        ...state,
+        timestamp: normalizedTimestamp,
+    };
 }
 
 /**

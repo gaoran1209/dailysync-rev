@@ -89,7 +89,7 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
             // 首次登录：无 session，通过 SSO 流程登录（兼容 MFA 和非 MFA 账号）
             console.log('GarminCN: 无已保存的 session，开始 SSO 登录...');
             await handleSsoLogin(GARMIN_USERNAME, GARMIN_PASSWORD);
-            return Promise.reject('SSO 登录流程已触发');
+            return Promise.reject(new Error('MFA_REQUESTED: SSO 登录流程已触发'));
         } else {
             // 尝试用已保存的 session 登录
             try {
@@ -99,7 +99,7 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
                 // Token 失效，通过 SSO 流程重新登录（只发一次请求，避免重复邮件）
                 console.log('Warn: GarminCN session expired, 通过 SSO 流程重新登录...');
                 await handleSsoLogin(GARMIN_USERNAME, GARMIN_PASSWORD);
-                return Promise.reject('SSO 登录流程已触发');
+                return Promise.reject(new Error('MFA_REQUESTED: SSO 登录流程已触发'));
             }
         }
 
