@@ -6,6 +6,10 @@ on:
     #  每6小时检查一次
     - cron: "0 */6 * * *"
 
+concurrency:
+  group: account2-cn-sync-mfa
+  cancel-in-progress: false
+
 env:
   # 第二组账号配置
   GARMIN_USERNAME: ${{ secrets.GARMIN_USERNAME_2 }}

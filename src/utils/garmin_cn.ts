@@ -36,7 +36,7 @@ async function handleSsoLogin(username: string, password: string): Promise<void>
         // 如果已有同账号且未过期的 MFA 状态，避免重复触发验证码邮件
         try {
             const existingState = loadMfaState();
-            if (existingState?.username && existingState.username === username) {
+            if (!existingState?.username || existingState.username === username) {
                 console.log('🔐 检测到已有未过期 MFA 请求，跳过重复发送验证码邮件');
                 const errMsg = '检测到已有未过期 MFA 验证码，请直接在 GitHub Actions 中触发 MFA Login workflow 完成登录';
                 core.setFailed(errMsg);

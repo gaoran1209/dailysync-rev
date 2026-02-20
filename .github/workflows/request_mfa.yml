@@ -3,6 +3,10 @@ name: Request MFA Code (Account 2)
 on:
   workflow_dispatch:
 
+concurrency:
+  group: account2-cn-sync-mfa
+  cancel-in-progress: false
+
 env:
   # Account 2 需要 MFA 验证
   GARMIN_USERNAME: ${{ secrets.GARMIN_USERNAME_2 }}

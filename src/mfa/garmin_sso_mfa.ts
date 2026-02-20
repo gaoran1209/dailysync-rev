@@ -23,6 +23,7 @@ export interface MfaState {
     username?: string;
     fromPage?: string;
     verifyPath?: string;
+    hiddenFields?: Record<string, string>;
 }
 
 const SSO_BASE = 'https://sso.garmin.cn/sso';
@@ -138,6 +139,21 @@ function extractVerifyPath(html: string): string | null {
     return null;
 }
 
+function extractHiddenInputs(html: string): Record<string, string> {
+    const result: Record<string, string> = {};
+    const inputRegex = /<input[^>]*>/gi;
+    const nameRegex = /name\s*=\s*["']([^"']+)["']/i;
+    const valueRegex = /value\s*=\s*["']([^"']*)["']/i;
+    const inputTags = html.match(inputRegex) || [];
+    for (const tag of inputTags) {
+        const nameMatch = tag.match(nameRegex);
+        if (!nameMatch?.[1]) continue;
+        const valueMatch = tag.match(valueRegex);
+        result[nameMatch[1]] = valueMatch?.[1] ?? '';
+    }
+    return result;
+}
+
 function resolveVerifyUrl(pathOrUrl: string | undefined): string {
     if (!pathOrUrl) return `${SSO_BASE}/verifyMFA/loginEnterMfaCode`;
     if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) return pathOrUrl;
@@ -219,8 +235,25 @@ export async function requestMfaCode(username: string, password: string): Promis
 
     cookies = mergeCookies(cookies, loginResp.headers['set-cookie']);
 
-    // 检查响应：如果包含 MFA 表单，说明需要验证码
-    const responseHtml = typeof loginResp.data === 'string' ? loginResp.data : '';
+    // 某些场景会先 302 到 verifyMFA 页面，这里主动跟进，确保拿到最新 csrf/fromPage
+    let responseHtml = typeof loginResp.data === 'string' ? loginResp.data : '';
+    const location = loginResp.headers['location'] as string | undefined;
+    if ((!responseHtml || !responseHtml.includes('_csrf')) && location) {
+        const maybeVerifyUrl = resolveVerifyUrl(location);
+        if (maybeVerifyUrl.includes('/verifyMFA/')) {
+            const verifyPageResp = await axios.get(maybeVerifyUrl, {
+                headers: {
+                    'User-Agent': UA_DEFAULT,
+                    'Cookie': cookies,
+                    'Referer': signinUrl,
+                },
+                maxRedirects: 5,
+                validateStatus: (s: number) => s < 500,
+            });
+            cookies = mergeCookies(cookies, verifyPageResp.headers['set-cookie']);
+            responseHtml = typeof verifyPageResp.data === 'string' ? verifyPageResp.data : responseHtml;
+        }
+    }
 
     // 检查是否直接登录成功（不需要 MFA）
     const directTicket = extractTicket(responseHtml);
@@ -256,7 +289,8 @@ export async function requestMfaCode(username: string, password: string): Promis
     console.log('[MFA] ✅ 请检查邮箱获取验证码');
 
     const fromPage = extractHiddenInputValue(responseHtml, 'fromPage') || 'loginEnterMfaCode';
-    const verifyPath = extractVerifyPath(responseHtml) || '/sso/verifyMFA/loginEnterMfaCode';
+    const verifyPath = extractVerifyPath(responseHtml) || location || '/sso/verifyMFA/loginEnterMfaCode';
+    const hiddenFields = extractHiddenInputs(responseHtml);
 
     return {
         csrf,
@@ -265,6 +299,7 @@ export async function requestMfaCode(username: string, password: string): Promis
         username,
         fromPage,
         verifyPath,
+        hiddenFields,
     };
 }
 
@@ -285,16 +320,22 @@ export async function verifyMfaCode(code: string, state: MfaState): Promise<stri
 
     const verifyUrl = resolveVerifyUrl(state.verifyPath);
     const fromPage = state.fromPage || 'loginEnterMfaCode';
+    const verifyFormData: Record<string, string> = {
+        ...(state.hiddenFields || {}),
+        'mfa-code': code,
+        // 兼容不同页面字段命名
+        'mfaCode': code,
+        '_csrf': state.csrf,
+        'fromPage': fromPage,
+        'embed': 'true',
+    };
+    console.log('[MFA] 验证提交目标:', verifyUrl);
+    console.log('[MFA] 验证提交 fromPage:', fromPage);
+    console.log('[MFA] MFA 隐藏字段数量:', Object.keys(state.hiddenFields || {}).length);
+
     const verifyResp = await axios.post(
         verifyUrl,
-        qs.stringify({
-            'mfa-code': code,
-            // 兼容不同页面字段命名
-            'mfaCode': code,
-            '_csrf': state.csrf,
-            'fromPage': fromPage,
-            'embed': 'true',
-        }),
+        qs.stringify(verifyFormData),
         {
             headers: {
                 'User-Agent': UA_DEFAULT,
@@ -321,6 +362,7 @@ export async function verifyMfaCode(code: string, state: MfaState): Promise<stri
     if (!ticket) {
         console.error('[MFA] 无法获取 ServiceTicket');
         console.error('[MFA] 响应状态:', verifyResp.status);
+        console.error('[MFA] 响应 Location:', verifyResp.headers['location'] || '');
         console.error('[MFA] 响应内容(前500字符):', responseHtml.substring(0, 500));
         throw new Error('[MFA] 验证码验证失败，请检查验证码是否正确或已过期');
     }

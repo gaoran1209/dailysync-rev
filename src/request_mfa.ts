@@ -9,7 +9,7 @@
  */
 
 import { GARMIN_PASSWORD_DEFAULT, GARMIN_USERNAME_DEFAULT, BARK_KEY_DEFAULT } from './constant';
-import { requestMfaCode, saveMfaState } from './mfa/garmin_sso_mfa';
+import { requestMfaCode, saveMfaState, loadMfaState } from './mfa/garmin_sso_mfa';
 import { sendBarkNotification } from './utils/garmin_common';
 
 const core = require('@actions/core');
@@ -25,6 +25,21 @@ async function main() {
         const errMsg = '请填写中国区用户名及密码：GARMIN_USERNAME, GARMIN_PASSWORD';
         core.setFailed(errMsg);
         throw new Error(errMsg);
+    }
+
+    // 避免重复发送验证码邮件
+    try {
+        const existingState = loadMfaState();
+        if (!existingState?.username || existingState.username === GARMIN_USERNAME) {
+            console.log('🔐 检测到已有未过期 MFA 请求，跳过重复发送验证码邮件');
+            await sendBarkNotification(
+                'Garmin MFA 验证码已存在',
+                '检测到已有未过期验证码请求，请直接在 GitHub Actions 中触发 MFA Login workflow',
+            );
+            return;
+        }
+    } catch {
+        // 无状态或已过期，继续发起请求
     }
 
     try {

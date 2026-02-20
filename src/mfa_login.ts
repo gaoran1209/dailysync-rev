@@ -30,6 +30,13 @@ function getCodeFromArgs(): string {
     throw new Error('请提供验证码: --code 123456 或设置环境变量 MFA_CODE');
 }
 
+function normalizeMfaCode(rawCode: string): string {
+    // 兼容复制时带空格/连字符/全角空格等情况
+    return rawCode
+        .trim()
+        .replace(/[^\dA-Za-z]/g, '');
+}
+
 async function main() {
     console.log('=== 佳明中国区 MFA 验证码登录 ===');
 
@@ -42,12 +49,24 @@ async function main() {
         return;
     }
 
-    console.log(`验证码: ${code}`);
+    code = normalizeMfaCode(code);
+    console.log(`验证码长度: ${code.length}`);
+    if (code.length < 4) {
+        const errMsg = '验证码格式异常，请确认输入的是邮件中的验证码';
+        core.setFailed(errMsg);
+        throw new Error(errMsg);
+    }
 
     try {
         // 1. 加载 MFA 中间状态
         const mfaState = loadMfaState();
         console.log(`MFA 状态已加载，请求时间: ${new Date(mfaState.timestamp).toLocaleString()}`);
+        const expectedUsername = process.env.GARMIN_USERNAME?.trim();
+        if (expectedUsername && mfaState.username && mfaState.username !== expectedUsername) {
+            const errMsg = `MFA 状态账号不匹配。state=${mfaState.username}, env=${expectedUsername}，请重新触发 Account 2 的验证码请求`;
+            core.setFailed(errMsg);
+            throw new Error(errMsg);
+        }
 
         // 2. 提交验证码，获取 ServiceTicket
         const ticket = await verifyMfaCode(code, mfaState);
