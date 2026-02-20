@@ -415,49 +415,19 @@ export async function exchangeAndSaveToken(ticket: string): Promise<void> {
     const GCClient = new GarminConnect({}, 'garmin.cn');
 
     try {
-        // 尝试通过 client 的内部方法完成 ticket 交换
-        // 如果 client 支持 exchangeToken 或类似方法
-        if (typeof GCClient.client?.exchangeToken === 'function') {
-            await GCClient.client.exchangeToken(ticket);
-        } else {
-            // 备用方案: 直接用 axios 完成 OAuth 交换
-            // Step 3a: 用 ticket 获取 OAuth1 consumer token
-            const oauth1Url = `https://connect.garmin.cn/modern/di-oauth/exchange/user/2.0`;
-            const oauth1Resp = await axios.post(
-                oauth1Url,
-                qs.stringify({ 'ticket': ticket }),
-                {
-                    headers: {
-                        'User-Agent': UA_DEFAULT,
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    maxRedirects: 5,
-                    validateStatus: (s: number) => s < 500,
-                },
-            );
+        // Step 1: Initialize OAuth Consumer mapping internal to GarminConnect
+        await GCClient.client.fetchOauthConsumer();
 
-            if (oauth1Resp.status !== 200 || !oauth1Resp.data) {
-                throw new Error(`OAuth1 交换失败: status=${oauth1Resp.status}`);
-            }
+        // Step 2: Use ticket to request and fetch OAuth1 token
+        const oauth1Res = await GCClient.client.getOauth1Token(ticket);
 
-            console.log('[MFA] ✅ 获取到 OAuth tokens');
+        // Step 3: Exchange Oauth1 for Oauth2 Token properly
+        await GCClient.client.exchange(oauth1Res);
 
-            // 保存 tokens 到数据库
-            await initDB();
-            const tokenData = oauth1Resp.data;
-            const existingSession = await getSessionFromDB('CN');
-
-            if (existingSession) {
-                await updateSessionToDB('CN', tokenData);
-            } else {
-                await saveSessionToDB('CN', tokenData);
-            }
-            console.log('[MFA] ✅ Token 已保存到数据库');
-            return;
-        }
-
-        // 如果通过 client 方法成功，保存 token
+        // Step 4: Export standardized Token string
         const token = GCClient.exportToken();
+
+        // 把完整 Token（包括 OAuth1 & OAuth2）保存到数据库
         await initDB();
         const existingSession = await getSessionFromDB('CN');
         if (existingSession) {
@@ -465,8 +435,8 @@ export async function exchangeAndSaveToken(ticket: string): Promise<void> {
         } else {
             await saveSessionToDB('CN', token);
         }
-        console.log('[MFA] ✅ Token 已保存到数据库');
 
+        console.log('[MFA] ✅ Token (OAuth1 & OAuth2) 已成功保存到数据库');
     } catch (e) {
         console.error('[MFA] Token 交换失败:', e.message);
         throw e;
@@ -509,10 +479,10 @@ export function loadMfaState(): MfaState {
         `[MFA] 状态时间: ${new Date(normalizedTimestamp).toISOString()}, 当前时间: ${new Date(now).toISOString()}, 已过去约 ${elapsedMinutes} 分钟`,
     );
 
-    // 允许少量调度/队列延迟，防止边界误判
-    const EXPIRY_MS = 35 * 60 * 1000;
+    // 设置为 25 分钟过期，防止和 verifyMfaCode 的 30 分钟限制冲突
+    const EXPIRY_MS = 25 * 60 * 1000;
     if (elapsed > EXPIRY_MS) {
-        throw new Error('[MFA] MFA 状态已过期（超过35分钟），请重新运行 request_mfa');
+        throw new Error('[MFA] MFA 状态已过期（超过25分钟），请重新运行 request_mfa');
     }
 
     return {
