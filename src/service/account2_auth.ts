@@ -1,5 +1,5 @@
 import { chromium, type BrowserContext, type Page } from 'playwright';
-import { exchangeAndSaveToken, extractTicket, getGarminCnSigninUrl } from '../mfa/garmin_sso_mfa';
+import { exchangeAndSaveToken, extractTicket } from '../mfa/garmin_sso_mfa';
 import { getGaminCNClient } from '../utils/garmin_cn';
 import {
     getAccountAuthState,
@@ -96,7 +96,8 @@ export class Account2AuthService {
     async startLogin(): Promise<Account2ActionResponse> {
         try {
             const page = await this.openFreshPage();
-            await page.goto(getGarminCnSigninUrl(), {
+            // 直接访问 connect.garmin.cn，让 Garmin 自动重定向到 SSO 登录页
+            await page.goto('https://sso.garmin.cn/sso/signin?service=https%3A%2F%2Fconnect.garmin.cn%2Fmodern&clientId=GarminConnect&gauthHost=https%3A%2F%2Fsso.garmin.cn%2Fsso', {
                 waitUntil: 'domcontentloaded',
                 timeout: 60_000,
             });
