@@ -23,8 +23,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          printf '%s' "${EC2_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
+          printf '%s' "${EC2_SSH_PRIVATE_KEY}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
 
       - name: Add EC2 host to known_hosts
         env:
@@ -52,7 +52,7 @@ jobs:
           ACCOUNT2_SYNC_WEBHOOK_TOKEN: ${{ secrets.ACCOUNT2_SYNC_WEBHOOK_TOKEN }}
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/id_ed25519 "${EC2_USER}@${EC2_HOST}" <<EOF
+          ssh -o ServerAliveInterval=60 -i ~/.ssh/deploy_key "${EC2_USER}@${EC2_HOST}" <<EOF
           set -euo pipefail
           mkdir -p "${EC2_DEPLOY_PATH}"
           cd "${EC2_DEPLOY_PATH}"
@@ -69,23 +69,42 @@ jobs:
           git clean -fdx
 
           cat > .env <<'ENVEOF'
-          APP_BASE_URL=${APP_BASE_URL}
-          GARMIN_USERNAME_2=${GARMIN_USERNAME_2}
-          GARMIN_PASSWORD_2=${GARMIN_PASSWORD_2}
-          GARMIN_GLOBAL_USERNAME_2=${GARMIN_GLOBAL_USERNAME_2}
-          GARMIN_GLOBAL_PASSWORD_2=${GARMIN_GLOBAL_PASSWORD_2}
-          AESKEY=${AESKEY}
-          BARK_KEY=${BARK_KEY}
-          ADMIN_USERNAME=${ADMIN_USERNAME}
-          ADMIN_PASSWORD=${ADMIN_PASSWORD}
-          ACCOUNT2_SYNC_WEBHOOK_TOKEN=${ACCOUNT2_SYNC_WEBHOOK_TOKEN}
-          PORT=3000
-          DB_FILE_PATH=/app/data/garmin.db
-          DOWNLOAD_DIR=/app/data/garmin_fit_files
-          PLAYWRIGHT_PROFILE_DIR=/app/data/playwright/account2
-          ENVEOF
+APP_BASE_URL=${APP_BASE_URL}
+GARMIN_USERNAME_2=${GARMIN_USERNAME_2}
+GARMIN_PASSWORD_2=${GARMIN_PASSWORD_2}
+GARMIN_GLOBAL_USERNAME_2=${GARMIN_GLOBAL_USERNAME_2}
+GARMIN_GLOBAL_PASSWORD_2=${GARMIN_GLOBAL_PASSWORD_2}
+AESKEY=${AESKEY}
+BARK_KEY=${BARK_KEY}
+ADMIN_USERNAME=${ADMIN_USERNAME}
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
+ACCOUNT2_SYNC_WEBHOOK_TOKEN=${ACCOUNT2_SYNC_WEBHOOK_TOKEN}
+PORT=3000
+DB_FILE_PATH=/app/data/garmin.db
+DOWNLOAD_DIR=/app/data/garmin_fit_files
+PLAYWRIGHT_PROFILE_DIR=/app/data/playwright/account2
+ENVEOF
 
+          # Build and start app container
           docker compose up -d --build --remove-orphans
+
+          # Setup nginx reverse proxy (idempotent)
+          if [ ! -f /etc/nginx/sites-available/dailysync-account2 ]; then
+            sudo cp deploy/nginx-site.conf /etc/nginx/sites-available/dailysync-account2
+            sudo ln -sf /etc/nginx/sites-available/dailysync-account2 /etc/nginx/sites-enabled/
+            sudo nginx -t && sudo systemctl reload nginx
+            echo "Nginx site config created and enabled"
+          else
+            echo "Nginx site config already exists, skipping"
+          fi
+
+          # Setup SSL with certbot (idempotent)
+          if [ ! -d /etc/letsencrypt/live/sync.gaoran.xyz ]; then
+            sudo certbot --nginx -d sync.gaoran.xyz --non-interactive --agree-tos --register-unsafely-without-email --redirect
+            echo "SSL certificate issued"
+          else
+            echo "SSL certificate already exists, skipping"
+          fi
           EOF
 
       - name: Check deployed health endpoint

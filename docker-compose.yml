@@ -13,32 +13,14 @@ services:
       DB_FILE_PATH: /app/data/garmin.db
       DOWNLOAD_DIR: /app/data/garmin_fit_files
       PLAYWRIGHT_PROFILE_DIR: /app/data/playwright/account2
-    expose:
-      - '3000'
+    ports:
+      - '127.0.0.1:3000:3000'
     container_name: daily-sync-account2-app
     restart: unless-stopped
     volumes:
       - app_data:/app/data
       - app_logs:/app/logs
 
-  caddy:
-    image: caddy:2.8
-    env_file:
-      - .env
-    depends_on:
-      - app
-    container_name: daily-sync-account2-caddy
-    ports:
-      - '80:80'
-      - '443:443'
-    restart: unless-stopped
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-
 volumes:
   app_data:
   app_logs:
-  caddy_data:
-  caddy_config:

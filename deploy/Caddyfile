@@ -1,5 +1,0 @@
-{$APP_BASE_URL} {
-    encode gzip
-
-    reverse_proxy app:3000
-}
