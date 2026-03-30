@@ -1,6 +1,7 @@
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import { exchangeAndSaveToken, extractTicket } from '../mfa/garmin_sso_mfa';
 import { getGaminCNClient } from '../utils/garmin_cn';
+import { refreshAndSaveToken } from '../utils/garmin_common';
 import {
     getAccountAuthState,
     getSessionFromDB,
@@ -11,6 +12,8 @@ import {
     markAccountAuthReauthRequired,
 } from '../utils/sqlite';
 import { getAccount2ServiceConfig } from './config';
+
+const { GarminConnect } = require('@gooin/garmin-connect');
 
 export interface Account2StatusSnapshot {
     accountKey: string;
@@ -361,10 +364,19 @@ export class Account2AuthService {
     }
 
     private async finalizeSuccessfulLogin(ticket: string, successMessage: string): Promise<Account2ActionResponse> {
-        await exchangeAndSaveToken(ticket, {
-            region: 'CN',
-            sessionUser: this.config.cn.username,
-        });
+        // 策略 1: 用 ticket 直接交换 OAuth token
+        try {
+            await exchangeAndSaveToken(ticket, {
+                region: 'CN',
+                sessionUser: this.config.cn.username,
+            });
+            console.log('[Account2Auth] Ticket exchange 成功');
+        } catch (exchangeErr) {
+            console.log('[Account2Auth] Ticket exchange 失败，尝试直接 login:', exchangeErr.message);
+            // 策略 2: MFA 刚完成，同一 IP 短期内不需要再次验证，直接用库的 login
+            await this.loginViaLibraryFallback();
+        }
+
         await getGaminCNClient({
             username: this.config.cn.username,
             password: this.config.cn.password,
@@ -379,6 +391,16 @@ export class Account2AuthService {
             message: successMessage,
             account: await this.getStatus(),
         };
+    }
+
+    private async loginViaLibraryFallback(): Promise<void> {
+        const GCClient = new GarminConnect({
+            username: this.config.cn.username,
+            password: this.config.cn.password,
+        }, 'garmin.cn');
+        await GCClient.login(this.config.cn.username, this.config.cn.password);
+        await refreshAndSaveToken(GCClient, 'CN', this.config.cn.username);
+        console.log('[Account2Auth] Library login fallback 成功');
     }
 }
 
