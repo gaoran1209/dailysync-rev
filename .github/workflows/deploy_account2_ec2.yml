@@ -57,13 +57,15 @@ jobs:
           mkdir -p "${EC2_DEPLOY_PATH}"
           cd "${EC2_DEPLOY_PATH}"
 
+          REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
           if [ ! -d .git ]; then
             git init
-            git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+            git remote add origin "\${REPO_URL}"
           fi
 
-          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git -c http.extraHeader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --depth=1 origin main
+          git remote set-url origin "\${REPO_URL}"
+          git fetch --depth=1 origin main
           git checkout -B main FETCH_HEAD
           git reset --hard FETCH_HEAD
           git clean -fdx
