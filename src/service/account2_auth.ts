@@ -185,13 +185,14 @@ export class Account2AuthService {
                 'input[autocomplete="one-time-code"]',
             ], code);
             await this.maybeTrustCurrentBrowser(page);
-            await this.submitForm(page);
 
-            const ticket = await this.extractTicketFromPage(page);
+            // 从 POST 响应体中截取 ticket，不让浏览器导航消费它
+            const ticket = await this.submitAndCaptureTicket(page);
             if (ticket) {
                 return await this.finalizeSuccessfulLogin(ticket, 'Garmin CN 登录成功，Token 已保存到数据库');
             }
 
+            // 没有截取到 ticket，可能验证码错误，检查页面状态
             if (await this.isMfaChallengePage(page)) {
                 const message = '验证码错误或已过期，请检查邮件中的最新验证码后重试';
                 await markAccountAuthAwaitingCode(this.config.accountKey, message);
@@ -284,6 +285,68 @@ export class Account2AuthService {
             return;
         }
         throw new Error(`未找到可点击的按钮: ${selectors.join(', ')}`);
+    }
+
+    /**
+     * 提交 MFA 表单并从 POST 响应中截取 ticket，阻止浏览器导航消费它。
+     * Ticket 是一次性的，浏览器一旦导航到 ticket URL 就会被消费。
+     */
+    private async submitAndCaptureTicket(page: Page): Promise<string | null> {
+        let capturedTicket: string | null = null;
+
+        // 拦截包含 ticket 的导航请求，提取 ticket 后阻止浏览器消费
+        await page.route('**/*', (route) => {
+            const url = route.request().url();
+            const ticket = extractTicket(url);
+            if (ticket && !capturedTicket) {
+                capturedTicket = ticket;
+                route.abort();
+                return;
+            }
+            route.continue();
+        });
+
+        // 同时监听 POST 响应体中的 ticket（embed 模式下 ticket 在 response_url 中）
+        const responsePromise = page.waitForResponse(
+            (resp) => resp.request().method() === 'POST' && resp.url().includes('/sso/'),
+            { timeout: 30_000 },
+        ).catch(() => null);
+
+        try {
+            await this.clickFirstVisible(page, [
+                'button[type="submit"]',
+                'input[type="submit"]',
+                'button:has-text("登录")',
+                'button:has-text("Sign In")',
+                'button:has-text("继续")',
+                'button:has-text("提交")',
+            ]);
+        } catch {
+            await page.keyboard.press('Enter').catch(() => undefined);
+        }
+
+        const response = await responsePromise;
+        if (!capturedTicket && response) {
+            try {
+                const body = await response.text();
+                capturedTicket = extractTicket(body);
+            } catch {
+                // response body may not be available if aborted
+            }
+        }
+
+        // 等一下让拦截有机会触发
+        await page.waitForTimeout(2_000);
+
+        // 清除路由拦截
+        await page.unroute('**/*').catch(() => undefined);
+
+        // 如果还没找到，从当前页面内容再试一次
+        if (!capturedTicket) {
+            capturedTicket = await this.extractTicketFromPage(page);
+        }
+
+        return capturedTicket;
     }
 
     private async submitForm(page: Page) {
