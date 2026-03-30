@@ -89,9 +89,9 @@ jobs:
 
           # Build and start app container
           if command -v docker-compose &>/dev/null; then
-            docker-compose up -d --build --remove-orphans
+            docker-compose up -d --build --force-recreate --remove-orphans
           elif docker compose version &>/dev/null; then
-            docker compose up -d --build --remove-orphans
+            docker compose up -d --build --force-recreate --remove-orphans
           else
             echo "Neither docker-compose nor docker compose found" && exit 1
           fi
