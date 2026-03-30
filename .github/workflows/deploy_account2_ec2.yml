@@ -1,0 +1,104 @@
+name: Deploy Account 2 Service to EC2
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'db/**'
+      - '*.md'
+      - 'assets/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Configure SSH key
+        env:
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s' "${EC2_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Add EC2 host to known_hosts
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          set -euo pipefail
+          ssh-keyscan -H "${EC2_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Deploy application to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          GARMIN_USERNAME_2: ${{ secrets.GARMIN_USERNAME_2 }}
+          GARMIN_PASSWORD_2: ${{ secrets.GARMIN_PASSWORD_2 }}
+          GARMIN_GLOBAL_USERNAME_2: ${{ secrets.GARMIN_GLOBAL_USERNAME_2 }}
+          GARMIN_GLOBAL_PASSWORD_2: ${{ secrets.GARMIN_GLOBAL_PASSWORD_2 }}
+          AESKEY: ${{ secrets.AESKEY }}
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          ACCOUNT2_SYNC_WEBHOOK_TOKEN: ${{ secrets.ACCOUNT2_SYNC_WEBHOOK_TOKEN }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_ed25519 "${EC2_USER}@${EC2_HOST}" <<EOF
+          set -euo pipefail
+          mkdir -p "${EC2_DEPLOY_PATH}"
+          cd "${EC2_DEPLOY_PATH}"
+
+          if [ ! -d .git ]; then
+            git init
+            git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          fi
+
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -c http.extraHeader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" fetch --depth=1 origin main
+          git checkout -B main FETCH_HEAD
+          git reset --hard FETCH_HEAD
+          git clean -fdx
+
+          cat > .env <<'ENVEOF'
+          APP_BASE_URL=${APP_BASE_URL}
+          GARMIN_USERNAME_2=${GARMIN_USERNAME_2}
+          GARMIN_PASSWORD_2=${GARMIN_PASSWORD_2}
+          GARMIN_GLOBAL_USERNAME_2=${GARMIN_GLOBAL_USERNAME_2}
+          GARMIN_GLOBAL_PASSWORD_2=${GARMIN_GLOBAL_PASSWORD_2}
+          AESKEY=${AESKEY}
+          BARK_KEY=${BARK_KEY}
+          ADMIN_USERNAME=${ADMIN_USERNAME}
+          ADMIN_PASSWORD=${ADMIN_PASSWORD}
+          ACCOUNT2_SYNC_WEBHOOK_TOKEN=${ACCOUNT2_SYNC_WEBHOOK_TOKEN}
+          PORT=3000
+          DB_FILE_PATH=/app/data/garmin.db
+          DOWNLOAD_DIR=/app/data/garmin_fit_files
+          PLAYWRIGHT_PROFILE_DIR=/app/data/playwright/account2
+          ENVEOF
+
+          docker compose up -d --build --remove-orphans
+          EOF
+
+      - name: Check deployed health endpoint
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            if curl -fsS "${APP_BASE_URL%/}/health"; then
+              exit 0
+            fi
+            echo "Health check attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "::error::Health check failed after 60 seconds"
+          exit 1

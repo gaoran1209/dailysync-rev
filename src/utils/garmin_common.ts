@@ -44,14 +44,15 @@ export const sendBarkNotification = async (title: string, message: string): Prom
 export const refreshAndSaveToken = async (
     client: GarminClientType,
     region: 'CN' | 'GLOBAL',
+    sessionUser?: string,
 ): Promise<void> => {
     try {
         const token = client.exportToken();
-        const existingSession = await getSessionFromDB(region);
+        const existingSession = await getSessionFromDB(region, sessionUser);
         if (existingSession) {
-            await updateSessionToDB(region, token);
+            await updateSessionToDB(region, token, sessionUser);
         } else {
-            await saveSessionToDB(region, token);
+            await saveSessionToDB(region, token, sessionUser);
         }
         console.log(`[Token] ${region} token 已更新到数据库`);
     } catch (e) {

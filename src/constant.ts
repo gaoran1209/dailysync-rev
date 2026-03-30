@@ -3,9 +3,9 @@ export const FILE_SUFFIX = {
     GPX: 'gpx',
     TCX: 'tcx',
 };
-export const DOWNLOAD_DIR = './garmin_fit_files';
-export const DB_FILE_PATH = './db/garmin.db';
-export const AESKEY_DEFAULT = 'LSKDAJALSD';
+export const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || './garmin_fit_files';
+export const DB_FILE_PATH = process.env.DB_FILE_PATH || './db/garmin.db';
+export const AESKEY_DEFAULT = process.env.AESKEY || process.env.AESKEY_DEFAULT || 'LSKDAJALSD';
 /**
  * GARMIN ACCOUNT
  */
@@ -63,5 +63,4 @@ export const STRAVA_ACCESS_TOKEN_DEFAULT = '';
 export const STRAVA_CLIENT_ID_DEFAULT = '';
 export const STRAVA_CLIENT_SECRET_DEFAULT = '';
 export const STRAVA_REDIRECT_URI_DEFAULT = '';
-
 

@@ -11,9 +11,6 @@ import axios from 'axios';
 import * as qs from 'qs';
 import { GARMIN_URL_DEFAULT, UA_DEFAULT } from '../constant';
 import { initDB, saveSessionToDB, updateSessionToDB, getSessionFromDB } from '../utils/sqlite';
-import { sendBarkNotification } from '../utils/garmin_common';
-
-const core = require('@actions/core');
 
 // MFA 中间状态存储 (用于在两个 workflow 之间传递 CSRF + cookies)
 export interface MfaState {
@@ -77,7 +74,7 @@ function extractCsrf(html: string): string | null {
 /**
  * 从 HTML 或 URL 中提取 ServiceTicket
  */
-function extractTicket(input: string): string | null {
+export function extractTicket(input: string): string | null {
     if (!input) return null;
 
     const directPatterns = [
@@ -110,6 +107,10 @@ function extractTicket(input: string): string | null {
     }
 
     return null;
+}
+
+export function getGarminCnSigninUrl(): string {
+    return `${SSO_BASE}/signin?${qs.stringify(COMMON_PARAMS)}`;
 }
 
 function extractHiddenInputValue(html: string, inputName: string): string | null {
@@ -196,7 +197,7 @@ export async function requestMfaCode(username: string, password: string): Promis
     console.log('[MFA] Step 1: 发送登录请求，触发验证码邮件...');
 
     // 1.1 先获取登录页面的 CSRF token
-    const signinUrl = `${SSO_BASE}/signin?${qs.stringify(COMMON_PARAMS)}`;
+    const signinUrl = getGarminCnSigninUrl();
     const pageResp = await axios.get(signinUrl, {
         headers: { 'User-Agent': UA_DEFAULT },
         maxRedirects: 0,
@@ -375,10 +376,18 @@ export async function verifyMfaCode(code: string, state: MfaState): Promise<stri
  * Step 3: 用 ServiceTicket 登录 GarminConnect 并保存 token
  * @param ticket ServiceTicket
  */
-export async function exchangeAndSaveToken(ticket: string): Promise<void> {
+export async function exchangeAndSaveToken(
+    ticket: string,
+    options: {
+        region?: 'CN' | 'GLOBAL';
+        sessionUser?: string;
+    } = {},
+): Promise<void> {
     console.log('[MFA] Step 3: 用 ServiceTicket 交换 OAuth tokens...');
 
     const { GarminConnect } = require('@gooin/garmin-connect');
+    const region = options.region ?? 'CN';
+    const sessionUser = options.sessionUser;
 
     // 创建一个新的 client 实例，使用 ticket 完成登录
     // GarminConnect 库的 login 最终也是通过 ticket 获取 token
@@ -429,11 +438,11 @@ export async function exchangeAndSaveToken(ticket: string): Promise<void> {
 
         // 把完整 Token（包括 OAuth1 & OAuth2）保存到数据库
         await initDB();
-        const existingSession = await getSessionFromDB('CN');
+        const existingSession = await getSessionFromDB(region, sessionUser);
         if (existingSession) {
-            await updateSessionToDB('CN', token);
+            await updateSessionToDB(region, token, sessionUser);
         } else {
-            await saveSessionToDB('CN', token);
+            await saveSessionToDB(region, token, sessionUser);
         }
 
         console.log('[MFA] ✅ Token (OAuth1 & OAuth2) 已成功保存到数据库');

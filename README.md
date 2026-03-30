@@ -20,6 +20,48 @@
 如果你不熟悉代码，强烈推荐使用这个版本，在网页上填入账号点击就能同步数据，简洁好用。
 [https://dailysync.vyzt.dev/](https://dailysync.vyzt.dev/)
 
+## Account 2 ECG 账号新方案
+针对开启 ECG 后必须邮件二次验证的国区账号，仓库现在新增了一个适合部署到 EC2 的常驻服务方案：
+
+- Garmin 国区登录和验证码提交流程都在 EC2 上完成，不再依赖 GitHub runner 中途人工补码。
+- 本地开发后只需要把代码推到 GitHub，GitHub Actions 会把最新代码同步部署到 EC2。
+- account 2 的定时同步由 GitHub Actions 调用 EC2 上的受保护 webhook 触发。
+- Garmin 国区/国际区账号密码、管理员账号密码、webhook token 都通过 GitHub Secrets 注入 EC2 的 `.env`。
+
+### 新增服务入口
+
+- `GET /health`
+- `GET /admin`
+- `GET /api/admin/account2/status`
+- `POST /api/admin/account2/login/start`
+- `POST /api/admin/account2/login/verify`
+- `POST /api/hooks/sync/account2`
+
+### 需要配置的 GitHub Secrets
+
+- `EC2_HOST`
+- `EC2_USER`
+- `EC2_SSH_PRIVATE_KEY`
+- `EC2_DEPLOY_PATH`
+- `APP_BASE_URL`
+- `GARMIN_USERNAME_2`
+- `GARMIN_PASSWORD_2`
+- `GARMIN_GLOBAL_USERNAME_2`
+- `GARMIN_GLOBAL_PASSWORD_2`
+- `ADMIN_USERNAME`
+- `ADMIN_PASSWORD`
+- `ACCOUNT2_SYNC_WEBHOOK_TOKEN`
+- `AESKEY`
+- `BARK_KEY`
+
+### Account 2 使用方式
+
+1. 把代码 push 到 `main`，等待 `Deploy Account 2 Service to EC2` workflow 完成部署。
+2. 打开 `${APP_BASE_URL}/admin`，用管理员账号密码登录。
+3. 点击“开始 Garmin 国区登录”，等待邮件验证码发送。
+4. 收到验证码后，在管理页提交验证码。
+5. 后续 GitHub 的 `Sync Garmin CN to Garmin Global (Account 2)` workflow 会定时调用 EC2 webhook 触发同步。
+
 ## 其他仓库备份
 gitlab: 
 [https://gitlab.com/gooin/dailysync](https://gitlab.com/gooin/dailysync)

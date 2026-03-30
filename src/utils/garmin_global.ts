@@ -2,14 +2,13 @@ import {
     GARMIN_GLOBAL_PASSWORD_DEFAULT,
     GARMIN_GLOBAL_USERNAME_DEFAULT,
     GARMIN_MIGRATE_NUM_DEFAULT,
-    GARMIN_MIGRATE_START_DEFAULT, GARMIN_SYNC_NUM_DEFAULT,
+    GARMIN_MIGRATE_START_DEFAULT,
+    GARMIN_SYNC_NUM_DEFAULT,
 } from '../constant';
 import { getGaminCNClient } from './garmin_cn';
-import { GarminClientType } from './type';
+import { GarminClientType, GarminLoginOptions, GarminSyncOptions } from './type';
 import { downloadGarminActivity, uploadGarminActivity, sendBarkNotification, refreshAndSaveToken } from './garmin_common';
 import { number2capital } from './number_tricks';
-const core = require('@actions/core');
-import _ from 'lodash';
 import { getSessionFromDB, initDB, saveSessionToDB, updateSessionToDB } from './sqlite';
 
 const { GarminConnect } = require('@gooin/garmin-connect');
@@ -20,99 +19,98 @@ const GARMIN_MIGRATE_NUM = process.env.GARMIN_MIGRATE_NUM ?? GARMIN_MIGRATE_NUM_
 const GARMIN_MIGRATE_START = process.env.GARMIN_MIGRATE_START ?? GARMIN_MIGRATE_START_DEFAULT;
 const GARMIN_SYNC_NUM = process.env.GARMIN_SYNC_NUM ?? GARMIN_SYNC_NUM_DEFAULT;
 
-export const getGaminGlobalClient = async (): Promise<GarminClientType> => {
-    if (_.isEmpty(GARMIN_GLOBAL_USERNAME) || _.isEmpty(GARMIN_GLOBAL_PASSWORD)) {
-        const errMsg = '请填写国际区用户名及密码：GARMIN_GLOBAL_USERNAME,GARMIN_GLOBAL_PASSWORD';
-        core.setFailed(errMsg);
-        return Promise.reject(errMsg);
+interface ResolvedGarminGlobalOptions {
+    username: string;
+    password: string;
+    sessionUser: string;
+}
+
+function resolveGlobalOptions(options: GarminLoginOptions = {}): ResolvedGarminGlobalOptions {
+    const username = (options.username ?? GARMIN_GLOBAL_USERNAME)?.trim();
+    const password = (options.password ?? GARMIN_GLOBAL_PASSWORD)?.trim();
+    if (!username || !password) {
+        throw new Error('请填写国际区用户名及密码：GARMIN_GLOBAL_USERNAME,GARMIN_GLOBAL_PASSWORD');
     }
+    return {
+        username,
+        password,
+        sessionUser: (options.sessionUser ?? username).trim(),
+    };
+}
 
-    const GCClient = new GarminConnect({ username: GARMIN_GLOBAL_USERNAME, password: GARMIN_GLOBAL_PASSWORD });
+export const getGaminGlobalClient = async (options: GarminLoginOptions = {}): Promise<GarminClientType> => {
+    const config = resolveGlobalOptions(options);
+    const GCClient = new GarminConnect({ username: config.username, password: config.password });
 
-    try {
-        await initDB();
+    await initDB();
 
-        const currentSession = await getSessionFromDB('GLOBAL');
-        if (!currentSession) {
+    const currentSession = await getSessionFromDB('GLOBAL', config.sessionUser);
+    if (!currentSession) {
+        try {
+            await GCClient.login();
+            await saveSessionToDB('GLOBAL', GCClient.exportToken(), config.sessionUser);
+        } catch (loginErr) {
+            const errMsg = `佳明国际区首次登录失败: ${loginErr.message}`;
+            console.error(errMsg);
+            await sendBarkNotification('Garmin Global 登录失败', errMsg);
+            throw new Error(errMsg);
+        }
+    } else {
+        GCClient.loadToken(currentSession.oauth1, currentSession.oauth2);
+        try {
+            await GCClient.getUserProfile();
+        } catch {
+            console.log('Warn: renew GarminGlobal session..');
             try {
-                await GCClient.login();
-                await saveSessionToDB('GLOBAL', GCClient.exportToken());
+                await GCClient.login(config.username, config.password);
+                await updateSessionToDB('GLOBAL', GCClient.exportToken(), config.sessionUser);
             } catch (loginErr) {
-                const errMsg = `佳明国际区首次登录失败: ${loginErr.message}`;
+                const errMsg = `佳明国际区 Token 过期且重新登录失败: ${loginErr.message}`;
                 console.error(errMsg);
                 await sendBarkNotification('Garmin Global 登录失败', errMsg);
-                core.setFailed(errMsg);
-                return Promise.reject(errMsg);
-            }
-        } else {
-            //  Wrap error message in GCClient, prevent terminate in github actions.
-            try {
-                console.log('GarminGlobal: login by saved session');
-                await GCClient.loadToken(currentSession.oauth1, currentSession.oauth2);
-            } catch (e) {
-                // Token 失效：尝试重新登录（国际区通常不需要 MFA）
-                console.log('Warn: renew GarminGlobal session..');
-                try {
-                    await GCClient.login(GARMIN_GLOBAL_USERNAME, GARMIN_GLOBAL_PASSWORD);
-                    await updateSessionToDB('GLOBAL', GCClient.exportToken());
-                } catch (loginErr) {
-                    const errMsg = `佳明国际区 Token 过期且重新登录失败: ${loginErr.message}`;
-                    console.error(errMsg);
-                    await sendBarkNotification('Garmin Global 登录失败', errMsg);
-                    core.setFailed(errMsg);
-                    return Promise.reject(errMsg);
-                }
+                throw new Error(errMsg);
             }
         }
+    }
+
+    try {
         const userInfo = await GCClient.getUserProfile();
         const { fullName, userName: emailAddress, location } = userInfo;
         if (!emailAddress) {
-            throw Error('佳明国际区登录失败，请检查填入的账号密码或您的网络环境')
+            throw new Error('佳明国际区登录失败，请检查填入的账号密码或您的网络环境');
         }
         console.log('Garmin userInfo global', { fullName, emailAddress, location });
-
-        // 每次成功获取用户信息后，刷新并保存最新 token
-        await refreshAndSaveToken(GCClient, 'GLOBAL');
-
+        await refreshAndSaveToken(GCClient, 'GLOBAL', config.sessionUser);
         return GCClient;
     } catch (err) {
         console.error(err);
-        core.setFailed(err);
+        throw err;
     }
 };
 
-export const migrateGarminGlobal2GarminCN = async (count = 200) => {
+export const migrateGarminGlobal2GarminCN = async (count = 200, options: GarminSyncOptions = {}) => {
     const actIndex = Number(GARMIN_MIGRATE_START) ?? 0;
-    // const actPerGroup = 10;
     const totalAct = Number(GARMIN_MIGRATE_NUM) ?? count;
 
-    const clientGlobal = await getGaminGlobalClient();
-    const clientCn = await getGaminCNClient();
+    const clientGlobal = await getGaminGlobalClient(options.global);
+    const clientCn = await getGaminCNClient(options.cn);
 
-    // 从佳明国际区读取活动数据
     const actSlices = await clientGlobal.getActivities(actIndex, totalAct);
-    // only running
-    // const runningActs = _.filter(actSlices, { activityType: { typeKey: 'running' } });
-
     const runningActs = actSlices;
     for (let j = 0; j < runningActs.length; j++) {
         const act = runningActs[j];
-        // 下载佳明原始数据
         const filePath = await downloadGarminActivity(act.activityId, clientGlobal);
-        // 上传到佳明中国区
         console.log(`本次开始向中国区上传第 ${number2capital(j + 1)} 条数据，相对总数上传到 ${number2capital(j + 1 + actIndex)} 条，  【 ${act.activityName} 】，开始于 【 ${act.startTimeLocal} 】，活动ID: 【 ${act.activityId} 】`);
         await uploadGarminActivity(filePath, clientCn);
-        // 等待2秒，避免API请求太过频繁
-        // await new Promise(resolve => setTimeout(resolve, 2000));
     }
 };
 
-export const syncGarminGlobal2GarminCN = async () => {
-    const clientCN = await getGaminCNClient();
-    const clientGlobal = await getGaminGlobalClient();
+export const syncGarminGlobal2GarminCN = async (options: GarminSyncOptions = {}) => {
+    const clientCN = await getGaminCNClient(options.cn);
+    const clientGlobal = await getGaminGlobalClient(options.global);
 
     const cnActs = await clientCN.getActivities(0, 1);
-    let globalActs = await clientGlobal.getActivities(0, Number(GARMIN_SYNC_NUM));
+    const globalActs = await clientGlobal.getActivities(0, Number(GARMIN_SYNC_NUM));
 
     const latestGlobalActStartTime = globalActs[0]?.startTimeLocal ?? '0';
     const latestCnActStartTime = cnActs[0]?.startTimeLocal ?? '0';
@@ -120,19 +118,15 @@ export const syncGarminGlobal2GarminCN = async () => {
     if (latestCnActStartTime === latestGlobalActStartTime) {
         console.log(`没有要同步的活动内容, 最近的活动:  【 ${globalActs[0]?.activityName} 】, 开始于: 【 ${latestGlobalActStartTime} 】`);
     } else {
-        // fix: #18
-        _.reverse(globalActs);
-        let actualNewActivityCount = 1;
-        for (let i = 0; i < globalActs.length; i++) {
-            const globalAct = globalActs[i];
+        const reversedActs = [...globalActs].reverse();
+        let actualNewActivityCount = 0;
+        for (const globalAct of reversedActs) {
             if (globalAct.startTimeLocal > latestCnActStartTime) {
-                // 下载佳明原始数据
                 const filePath = await downloadGarminActivity(globalAct.activityId, clientGlobal);
-                // 上传到佳明中国区的
+                actualNewActivityCount += 1;
                 console.log(`本次开始向中国区上传第 ${number2capital(actualNewActivityCount)} 条数据，【 ${globalAct.activityName} 】，开始于 【 ${globalAct.startTimeLocal} 】，活动ID: 【 ${globalAct.activityId} 】`);
                 await uploadGarminActivity(filePath, clientCN);
                 await new Promise(resolve => setTimeout(resolve, 1000));
-                actualNewActivityCount++;
             }
         }
     }

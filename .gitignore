@@ -2,6 +2,7 @@ dist
 node_modules
 *.log
 garmin_fit_files
+.env
 ./src/constant.my.ts
 
 # Virtual environment
@@ -14,6 +15,8 @@ pyvenv.cfg
 *.pyc
 node_modules
 yarn-error.log
+data
+logs
 
 /public
 # Build directory
