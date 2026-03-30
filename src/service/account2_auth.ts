@@ -99,8 +99,10 @@ export class Account2AuthService {
     async startLogin(): Promise<Account2ActionResponse> {
         try {
             const page = await this.openFreshPage();
-            // 直接访问 connect.garmin.cn，让 Garmin 自动重定向到 SSO 登录页
-            await page.goto('https://sso.garmin.cn/sso/signin?service=https%3A%2F%2Fconnect.garmin.cn%2Fmodern&clientId=GarminConnect&gauthHost=https%3A%2F%2Fsso.garmin.cn%2Fsso', {
+            // 用与 @gooin/garmin-connect 库一致的参数，确保 ticket 的 service 匹配 OAuth exchange 的 login-url
+            const ssoEmbed = 'https://sso.garmin.cn/sso/embed';
+            const signinUrl = `https://sso.garmin.cn/sso/signin?clientId=GarminConnect&locale=en&id=gauth-widget&embedWidget=true&gauthHost=${encodeURIComponent(ssoEmbed)}&service=${encodeURIComponent(ssoEmbed)}&source=${encodeURIComponent(ssoEmbed)}&redirectAfterAccountLoginUrl=${encodeURIComponent(ssoEmbed)}&redirectAfterAccountCreationUrl=${encodeURIComponent(ssoEmbed)}`;
+            await page.goto(signinUrl, {
                 waitUntil: 'domcontentloaded',
                 timeout: 60_000,
             });
