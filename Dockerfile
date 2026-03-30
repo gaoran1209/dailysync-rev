@@ -3,7 +3,6 @@ FROM node:20-bookworm
 WORKDIR /app
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-ENV NODE_ENV=production
 
 RUN corepack enable \
     && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
@@ -17,6 +16,8 @@ COPY assets ./assets
 COPY LICENSE.txt README.md ./
 
 RUN yarn build
+
+ENV NODE_ENV=production
 
 EXPOSE 3000
 
