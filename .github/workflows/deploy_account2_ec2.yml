@@ -88,7 +88,13 @@ jobs:
           ENVEOF
 
           # Build and start app container
-          docker compose up -d --build --remove-orphans
+          if command -v docker-compose &>/dev/null; then
+            docker-compose up -d --build --remove-orphans
+          elif docker compose version &>/dev/null; then
+            docker compose up -d --build --remove-orphans
+          else
+            echo "Neither docker-compose nor docker compose found" && exit 1
+          fi
 
           # Setup nginx reverse proxy (idempotent)
           if [ ! -f /etc/nginx/sites-available/dailysync-account2 ]; then
