@@ -24,9 +24,20 @@
 针对开启 ECG 后必须邮件二次验证的国区账号，仓库现在新增了一个适合部署到 EC2 的常驻服务方案：
 
 - Garmin 国区登录和验证码提交流程都在 EC2 上完成，不再依赖 GitHub runner 中途人工补码。
+- **全自动验证码**：配置邮箱 IMAP 后，服务会在登录触发验证码邮件后自动从邮箱读取 6 位验证码并提交，无需人工。
+- **自愈式重登录**：定时同步时若发现 Garmin 登录态失效（且区分了瞬时网络错误，不会误删长效 token），会自动走一次「登录 + 邮箱取码」重新拿 token 再重试同步。
 - 本地开发后只需要把代码推到 GitHub，GitHub Actions 会把最新代码同步部署到 EC2。
 - account 2 的定时同步由 GitHub Actions 调用 EC2 上的受保护 webhook 触发。
-- Garmin 国区/国际区账号密码、管理员账号密码、webhook token 都通过 GitHub Secrets 注入 EC2 的 `.env`。
+- Garmin 国区/国际区账号密码、管理员账号密码、webhook token、邮箱 IMAP 授权码都通过 GitHub Secrets 注入 EC2 的 `.env`。
+
+### 邮箱自动取码配置（163 邮箱示例）
+1. 登录 163 邮箱网页版 → 设置 → POP3/SMTP/IMAP → 开启 **IMAP/SMTP 服务**，并按提示生成一串 **客户端授权码**（不是邮箱登录密码）。
+2. 在 GitHub 仓库 Secrets 里新增：
+   - `MAIL_IMAP_PASSWORD`：上一步的授权码（**必填**，不填则回退到管理页人工提交验证码）
+   - `MAIL_IMAP_HOST`：可选，默认 `imap.163.com`
+   - `MAIL_IMAP_PORT`：可选，默认 `993`
+   - `MAIL_IMAP_USER`：可选，默认取 `GARMIN_USERNAME_2`（即收验证码的那个邮箱）
+3. 其它邮箱同理，把 host 换成对应 IMAP 服务器（QQ 邮箱 `imap.qq.com`、Gmail `imap.gmail.com` 等），密码同样用授权码/应用专用密码。
 
 ### 新增服务入口
 
@@ -53,14 +64,16 @@
 - `ACCOUNT2_SYNC_WEBHOOK_TOKEN`
 - `AESKEY`
 - `BARK_KEY`
+- `MAIL_IMAP_PASSWORD`（邮箱 IMAP 授权码，用于自动读取验证码；不配则回退人工补码）
+- `MAIL_IMAP_HOST` / `MAIL_IMAP_PORT` / `MAIL_IMAP_USER`（均可选，默认 163）
 
 ### Account 2 使用方式
 
 1. 把代码 push 到 `main`，等待 `Deploy Account 2 Service to EC2` workflow 完成部署。
 2. 打开 `${APP_BASE_URL}/admin`，用管理员账号密码登录。
-3. 点击“开始 Garmin 国区登录”，等待邮件验证码发送。
-4. 收到验证码后，在管理页提交验证码。
-5. 后续 GitHub 的 `Sync Garmin CN to Garmin Global (Account 2)` workflow 会定时调用 EC2 webhook 触发同步。
+3. 已配置 `MAIL_IMAP_PASSWORD` 时：点击「全自动登录（邮箱自动取码）」，服务会自动发起登录、等邮件、读码、提交，一步到位。
+4. 未配置邮箱或想手动时：点击「开始 Garmin 国区登录」，收到邮件验证码后在管理页填入并提交。
+5. 后续 GitHub 的 `Sync Garmin CN to Garmin Global (Account 2)` workflow 会定时调用 EC2 webhook 触发同步；即使 token 到期，webhook 也会先自动重登录再重试，通常无需人工介入。
 
 ## 其他仓库备份
 gitlab: 

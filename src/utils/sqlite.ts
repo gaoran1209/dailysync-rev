@@ -119,7 +119,13 @@ export const getSessionFromDB = async (
     if (!queryResult) {
         return undefined;
     }
-    return decryptSession(queryResult.session);
+    try {
+        return decryptSession(queryResult.session);
+    } catch (e) {
+        // AESKEY 变更或数据损坏时按无 session 处理，走重新登录而不是让整个同步崩掉
+        console.log(`[DB] ${type}/${user} session 解密失败（AESKEY 可能已更换），按无 session 处理: ${e.message}`);
+        return undefined;
+    }
 };
 
 export const getAccountAuthState = async (accountKey: string): Promise<AccountAuthState | undefined> => {

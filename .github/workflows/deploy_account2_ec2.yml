@@ -50,6 +50,10 @@ jobs:
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           ACCOUNT2_SYNC_WEBHOOK_TOKEN: ${{ secrets.ACCOUNT2_SYNC_WEBHOOK_TOKEN }}
+          MAIL_IMAP_HOST: ${{ secrets.MAIL_IMAP_HOST }}
+          MAIL_IMAP_PORT: ${{ secrets.MAIL_IMAP_PORT }}
+          MAIL_IMAP_USER: ${{ secrets.MAIL_IMAP_USER }}
+          MAIL_IMAP_PASSWORD: ${{ secrets.MAIL_IMAP_PASSWORD }}
         run: |
           set -euo pipefail
           ssh -o ServerAliveInterval=60 -i ~/.ssh/deploy_key "${EC2_USER}@${EC2_HOST}" <<EOF
@@ -81,6 +85,10 @@ jobs:
           ADMIN_USERNAME=${ADMIN_USERNAME}
           ADMIN_PASSWORD=${ADMIN_PASSWORD}
           ACCOUNT2_SYNC_WEBHOOK_TOKEN=${ACCOUNT2_SYNC_WEBHOOK_TOKEN}
+          MAIL_IMAP_HOST=${MAIL_IMAP_HOST}
+          MAIL_IMAP_PORT=${MAIL_IMAP_PORT}
+          MAIL_IMAP_USER=${MAIL_IMAP_USER}
+          MAIL_IMAP_PASSWORD=${MAIL_IMAP_PASSWORD}
           PORT=3000
           DB_FILE_PATH=/app/data/garmin.db
           DOWNLOAD_DIR=/app/data/garmin_fit_files
@@ -96,14 +104,17 @@ jobs:
             echo "Neither docker-compose nor docker compose found" && exit 1
           fi
 
-          # Setup nginx reverse proxy (idempotent)
+          # Setup/refresh nginx reverse proxy (keep timeouts in sync with repo config).
+          # certbot 已在既有配置上追加了 SSL server 块，所以只在缺少 proxy_read_timeout 更新时替换 HTTP 块超时
           if [ ! -f /etc/nginx/sites-available/dailysync-account2 ]; then
             sudo cp deploy/nginx-site.conf /etc/nginx/sites-available/dailysync-account2
             sudo ln -sf /etc/nginx/sites-available/dailysync-account2 /etc/nginx/sites-enabled/
             sudo nginx -t && sudo systemctl reload nginx
             echo "Nginx site config created and enabled"
           else
-            echo "Nginx site config already exists, skipping"
+            sudo sed -i 's/proxy_read_timeout 120s;/proxy_read_timeout 600s;/' /etc/nginx/sites-available/dailysync-account2
+            sudo nginx -t && sudo systemctl reload nginx
+            echo "Nginx site config refreshed (timeouts)"
           fi
 
           # Setup SSL with certbot (idempotent)

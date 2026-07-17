@@ -24,33 +24,20 @@ export interface MfaState {
 }
 
 const SSO_BASE = 'https://sso.garmin.cn/sso';
+// 关键: ticket 的 service 必须与 @gooin/garmin-connect 库 OAuth1 交换时的
+// login-url (sso/embed) 一致，否则 getOauth1Token 会失败
+const SSO_EMBED = 'https://sso.garmin.cn/sso/embed';
 
 const COMMON_PARAMS = {
-    'clientId': 'GarminConnect',
-    'consumeServiceTicket': 'false',
-    'createAccountShown': 'true',
-    'cssUrl': GARMIN_URL_DEFAULT.CSS_URL,
-    'displayNameShown': 'false',
-    'embedWidget': 'false',
-    'gauthHost': SSO_BASE,
-    'generateExtraServiceTicket': 'true',
-    'generateTwoExtraServiceTickets': 'true',
-    'generateNoServiceTicket': 'false',
-    'globalOptInChecked': 'false',
-    'globalOptInShown': 'true',
     'id': 'gauth-widget',
-    'initialFocus': 'true',
-    'locale': 'zh_CN',
-    'locationPromptShown': 'true',
-    'mobile': 'false',
-    'openCreateAccount': 'false',
-    'redirectAfterAccountCreationUrl': GARMIN_URL_DEFAULT.MODERN_URL,
-    'redirectAfterAccountLoginUrl': GARMIN_URL_DEFAULT.MODERN_URL,
-    'rememberMeChecked': 'false',
-    'rememberMeShown': 'true',
-    'service': GARMIN_URL_DEFAULT.MODERN_URL,
-    'source': GARMIN_URL_DEFAULT.SIGNIN_URL,
-    'webhost': GARMIN_URL_DEFAULT.MODERN_URL,
+    'embedWidget': 'true',
+    'clientId': 'GarminConnect',
+    'locale': 'en',
+    'gauthHost': SSO_EMBED,
+    'service': SSO_EMBED,
+    'source': SSO_EMBED,
+    'redirectAfterAccountLoginUrl': SSO_EMBED,
+    'redirectAfterAccountCreationUrl': SSO_EMBED,
 };
 
 /**
@@ -78,8 +65,8 @@ export function extractTicket(input: string): string | null {
     if (!input) return null;
 
     const directPatterns = [
-        /(?:[?&]|^)ticket=([^&"'\\s<>]+)/i,
-        /ServiceTicket=([^&"'\\s<>]+)/i,
+        /(?:[?&]|^)ticket=([^&"'\s<>]+)/i,
+        /ServiceTicket=([^&"'\s<>]+)/i,
     ];
     for (const pattern of directPatterns) {
         const match = input.match(pattern);
@@ -101,7 +88,7 @@ export function extractTicket(input: string): string | null {
             const ticket = url.searchParams.get('ticket') || url.searchParams.get('ServiceTicket');
             if (ticket) return ticket;
         } catch {
-            const fallback = responseUrl.match(/(?:[?&]|^)ticket=([^&"'\\s<>]+)/i);
+            const fallback = responseUrl.match(/(?:[?&]|^)ticket=([^&"'\s<>]+)/i);
             if (fallback?.[1]) return fallback[1];
         }
     }
@@ -196,15 +183,26 @@ function mergeCookies(existingCookies: string, setCookieHeaders: string | string
 export async function requestMfaCode(username: string, password: string): Promise<MfaState> {
     console.log('[MFA] Step 1: 发送登录请求，触发验证码邮件...');
 
-    // 1.1 先获取登录页面的 CSRF token
+    // 1.0 与库的 login 流程一致，先 GET sso/embed 建立 CAS 初始 cookies
+    const embedResp = await axios.get(
+        `${SSO_EMBED}?${qs.stringify({ clientId: 'GarminConnect', locale: 'en', service: GARMIN_URL_DEFAULT.MODERN_URL })}`,
+        {
+            headers: { 'User-Agent': UA_DEFAULT },
+            maxRedirects: 5,
+            validateStatus: (s: number) => s < 400,
+        },
+    );
+    let cookies = mergeCookies('', embedResp.headers['set-cookie']);
+
+    // 1.1 再获取登录页面的 CSRF token
     const signinUrl = getGarminCnSigninUrl();
     const pageResp = await axios.get(signinUrl, {
-        headers: { 'User-Agent': UA_DEFAULT },
+        headers: { 'User-Agent': UA_DEFAULT, 'Cookie': cookies },
         maxRedirects: 0,
         validateStatus: (s: number) => s < 400,
     });
 
-    let cookies = mergeCookies('', pageResp.headers['set-cookie']);
+    cookies = mergeCookies(cookies, pageResp.headers['set-cookie']);
     let csrf = extractCsrf(pageResp.data);
 
     if (!csrf) {
@@ -389,35 +387,8 @@ export async function exchangeAndSaveToken(
     const region = options.region ?? 'CN';
     const sessionUser = options.sessionUser;
 
-    // 创建一个新的 client 实例，使用 ticket 完成登录
-    // GarminConnect 库的 login 最终也是通过 ticket 获取 token
-    // 我们这里需要利用 ticket 来获取 OAuth tokens
-
-    // 方法: 用 ticket URL 访问 connect.garmin.cn/modern/?ticket=xxx 来建立 session
-    const ticketUrl = `${GARMIN_URL_DEFAULT.MODERN_URL}?ticket=${ticket}`;
-
-    const ticketResp = await axios.get(ticketUrl, {
-        headers: { 'User-Agent': UA_DEFAULT },
-        maxRedirects: 5,
-        validateStatus: (s: number) => s < 500,
-    });
-
-    // 从响应中提取 session cookies
-    const sessionCookies = mergeCookies('', ticketResp.headers['set-cookie']);
-
-    // 由于 @gooin/garmin-connect 库不直接支持 ticket 登录，
-    // 我们需要通过其内部 HttpClient 来设置 session
-    // 替代方案: 使用库的 login 流程但传入预认证的 cookies
-
-    // 实际使用时，最简单的方法是：
-    // 用 GarminConnect 直接 login()，但是我们已经通过 MFA 获得了 ServiceTicket
-    // 库的 login 内部流程也是: 密码 → ticket → OAuth tokens
-    // 我们可以尝试直接创建 client 并调用其内部的 token 交换方法
-
-    // 最可靠的方式：用 GarminConnect 实例化后，直接走 login 流程
-    // 由于 MFA 已通过，再次 login 应该能成功（利用 cookies）
-    // 但更安全的方式是保存 ticket 并让 client 使用
-
+    // 注意: ServiceTicket 是一次性的。这里绝不能先访问 modern/?ticket= 页面，
+    // 否则 ticket 被 CAS 消费，后面的 OAuth1 交换必然失败。
     console.log('[MFA] 尝试使用 ServiceTicket 获取 OAuth tokens...');
 
     // 使用 GarminConnect 的底层方法来完成 token 交换

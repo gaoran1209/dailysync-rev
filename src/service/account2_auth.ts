@@ -1,7 +1,8 @@
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import { exchangeAndSaveToken, extractTicket } from '../mfa/garmin_sso_mfa';
 import { getGaminCNClient } from '../utils/garmin_cn';
-import { refreshAndSaveToken } from '../utils/garmin_common';
+import { refreshAndSaveToken, sendBarkNotification } from '../utils/garmin_common';
+import { fetchGarminMfaCode } from './mail_code_fetcher';
 import {
     getAccountAuthState,
     getSessionFromDB,
@@ -46,6 +47,73 @@ export class Account2AuthService {
     private readonly config = getAccount2ServiceConfig();
     private contextPromise: Promise<BrowserContext> | null = null;
     private pendingLogin: PendingLoginState | null = null;
+    private autoLoginInFlight: Promise<Account2ActionResponse> | null = null;
+
+    get canAutoLogin(): boolean {
+        return Boolean(this.config.mail);
+    }
+
+    /**
+     * 全自动登录：发起 Playwright 登录 → 从邮箱自动读取 MFA 验证码 → 提交。
+     * 单飞：并发调用共享同一次登录流程。
+     */
+    async autoLogin(): Promise<Account2ActionResponse> {
+        if (this.autoLoginInFlight) {
+            return this.autoLoginInFlight;
+        }
+        this.autoLoginInFlight = this.doAutoLogin().finally(() => {
+            this.autoLoginInFlight = null;
+        });
+        return this.autoLoginInFlight;
+    }
+
+    private async doAutoLogin(): Promise<Account2ActionResponse> {
+        const mail = this.config.mail;
+        if (!mail) {
+            return {
+                status: 'reauth_required',
+                message: '未配置 MAIL_IMAP_PASSWORD，无法自动读取验证码，请在管理页人工完成登录',
+                account: await this.getStatus(),
+            };
+        }
+
+        // 记录发起时间，只接受这之后收到的验证码邮件
+        const requestedAt = Date.now();
+        console.log('[Account2Auth] 自动登录: 发起 Garmin CN 登录...');
+        const startResult = await this.startLogin();
+        if (startResult.status === 'ready') {
+            await sendBarkNotification('Garmin CN 自动登录成功', '无需验证码，token 已刷新');
+            return startResult;
+        }
+        if (startResult.status !== 'awaiting_code') {
+            await sendBarkNotification('Garmin CN 自动登录失败', startResult.message);
+            return startResult;
+        }
+
+        console.log('[Account2Auth] 自动登录: 等待邮箱验证码...');
+        let code: string;
+        try {
+            code = await fetchGarminMfaCode(mail, { sinceMs: requestedAt });
+        } catch (err) {
+            const message = sanitizeMessage(`自动读取验证码失败: ${err.message}`);
+            await markAccountAuthError(this.config.accountKey, message);
+            await sendBarkNotification('Garmin CN 自动登录失败', `${message}，可在管理页人工提交验证码`);
+            return {
+                status: 'error',
+                message,
+                account: await this.getStatus(),
+            };
+        }
+
+        console.log('[Account2Auth] 自动登录: 已取得验证码，提交中...');
+        const verifyResult = await this.verifyCode(code);
+        if (verifyResult.status === 'ready') {
+            await sendBarkNotification('Garmin CN 自动登录成功', '已自动完成邮箱验证码登录，token 已保存');
+        } else {
+            await sendBarkNotification('Garmin CN 自动登录失败', verifyResult.message);
+        }
+        return verifyResult;
+    }
 
     async getStatus(): Promise<Account2StatusSnapshot> {
         await initDB();

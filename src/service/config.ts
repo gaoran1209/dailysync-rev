@@ -22,6 +22,14 @@ export interface Account2ServiceConfig {
         password: string;
     };
     webhookToken: string;
+    /** 自动从邮箱读 MFA 验证码的配置；未配置 MAIL_IMAP_PASSWORD 时为 null（回退到管理页人工提交） */
+    mail: {
+        host: string;
+        port: number;
+        secure: boolean;
+        user: string;
+        password: string;
+    } | null;
 }
 
 function requireEnv(name: string): string {
@@ -30,6 +38,22 @@ function requireEnv(name: string): string {
         throw new Error(`缺少环境变量 ${name}`);
     }
     return value;
+}
+
+function buildMailConfig(): Account2ServiceConfig['mail'] {
+    const password = process.env.MAIL_IMAP_PASSWORD?.trim();
+    if (!password) {
+        return null;
+    }
+    const port = Number(process.env.MAIL_IMAP_PORT || '993');
+    return {
+        host: process.env.MAIL_IMAP_HOST?.trim() || 'imap.163.com',
+        port: Number.isFinite(port) && port > 0 ? port : 993,
+        secure: process.env.MAIL_IMAP_SECURE !== 'false',
+        // 默认用国区 Garmin 账号邮箱（即收验证码的邮箱）
+        user: process.env.MAIL_IMAP_USER?.trim() || requireEnv('GARMIN_USERNAME_2'),
+        password,
+    };
 }
 
 let cachedConfig: Account2ServiceConfig | undefined;
@@ -72,6 +96,7 @@ export function getAccount2ServiceConfig(): Account2ServiceConfig {
             password: requireEnv('ADMIN_PASSWORD'),
         },
         webhookToken: requireEnv('ACCOUNT2_SYNC_WEBHOOK_TOKEN'),
+        mail: buildMailConfig(),
     };
 
     return cachedConfig;

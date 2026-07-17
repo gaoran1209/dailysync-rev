@@ -92,6 +92,7 @@ export function renderAdminPage(status: Account2StatusSnapshot): string {
         <p>点击后，服务会在 EC2 上的持久浏览器上下文里提交国区账号密码。如果需要邮件验证码，状态会切到 <code>awaiting_code</code>。</p>
         <div class="toolbar">
           <button type="button" id="start-login">开始 Garmin 国区登录</button>
+          <button type="button" id="auto-login" style="background:#047857;">全自动登录（邮箱自动取码）</button>
         </div>
         <div class="message" id="start-message">等待操作。</div>
       </section>
@@ -151,6 +152,14 @@ export function renderAdminPage(status: Account2StatusSnapshot): string {
       const data = await postJson('/api/admin/account2/login/start');
       if (!data) return;
       startMessageEl.textContent = data.message || '已发起登录';
+      await loadStatus();
+    });
+
+    document.getElementById('auto-login').addEventListener('click', async () => {
+      startMessageEl.textContent = '正在全自动登录（发起登录 + 等待邮箱验证码，最长约 5 分钟）...';
+      const data = await postJson('/api/admin/account2/login/auto');
+      if (!data) return;
+      startMessageEl.textContent = data.message || '自动登录已完成';
       await loadStatus();
     });
 

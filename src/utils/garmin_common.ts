@@ -73,7 +73,9 @@ export const uploadGarminActivity = async (fitFilePath: string, client: GarminCl
         const upload = await client.uploadActivity(fitFilePath);
         console.log('upload to garmin activity', upload);
     } catch (error) {
+        // 上传失败必须抛出，否则同步会虚报成功、活动被跳过
         console.log('upload to garmin activity error', error);
+        throw error;
     }
 };
 

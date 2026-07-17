@@ -85,38 +85,97 @@ app.post('/api/admin/account2/login/verify', requireAdmin, async (req, res) => {
     res.json(await account2AuthService.verifyCode(code));
 });
 
+app.post('/api/admin/account2/login/auto', requireAdmin, async (_req, res) => {
+    res.json(await account2AuthService.autoLogin());
+});
+
+function runAccount2Sync() {
+    return syncGarminCN2GarminGlobal({
+        cn: {
+            username: config.cn.username,
+            password: config.cn.password,
+            sessionUser: config.cn.username,
+            loginMode: 'token_only',
+            authStateKey: config.accountKey,
+        },
+        global: {
+            username: config.global.username,
+            password: config.global.password,
+            sessionUser: config.global.username,
+        },
+    });
+}
+
+// 同步互斥：cron webhook 与人工触发不允许并发跑
+let syncInFlight = false;
+
 app.post('/api/hooks/sync/account2', requireWebhookToken, async (_req, res) => {
-    try {
-        const result = await syncGarminCN2GarminGlobal({
-            cn: {
-                username: config.cn.username,
-                password: config.cn.password,
-                sessionUser: config.cn.username,
-                loginMode: 'token_only',
-                authStateKey: config.accountKey,
-            },
-            global: {
-                username: config.global.username,
-                password: config.global.password,
-                sessionUser: config.global.username,
-            },
+    if (syncInFlight) {
+        res.status(409).json({
+            status: 'busy',
+            message: '已有同步任务在执行中，请稍后再试',
         });
+        return;
+    }
+    syncInFlight = true;
+    try {
+        const result = await runAccount2Sync();
         res.status(200).json(result);
     } catch (err) {
         const message = normalizeError(err);
-        if (message.includes('REAUTH_REQUIRED')) {
-            await markAccountAuthReauthRequired(config.accountKey, message);
-            res.status(409).json({
-                status: 'reauth_required',
+        // 瞬时网络错误：登录态仍有效，本次跳过，不报警不重登录
+        if (message.includes('TRANSIENT_ERROR')) {
+            console.log('[Sync] 瞬时错误，跳过本次:', message);
+            res.status(200).json({
+                status: 'skipped',
                 message,
             });
             return;
         }
-        await markAccountAuthError(config.accountKey, message);
-        res.status(500).json({
-            status: 'failed',
-            message,
-        });
+        if (!message.includes('REAUTH_REQUIRED')) {
+            await markAccountAuthError(config.accountKey, message);
+            res.status(500).json({
+                status: 'failed',
+                message,
+            });
+            return;
+        }
+
+        // 登录态失效：尝试全自动重登录（邮箱自动取验证码），成功后重试一次同步
+        await markAccountAuthReauthRequired(config.accountKey, message);
+        if (!account2AuthService.canAutoLogin) {
+            res.status(409).json({
+                status: 'reauth_required',
+                message: `${message}（未配置 MAIL_IMAP_PASSWORD，需在管理页人工登录）`,
+            });
+            return;
+        }
+
+        console.log('[Sync] Garmin CN 登录态失效，尝试自动重登录...');
+        try {
+            const loginResult = await account2AuthService.autoLogin();
+            if (loginResult.status !== 'ready') {
+                res.status(409).json({
+                    status: 'reauth_required',
+                    message: `自动重登录未成功: ${loginResult.message}`,
+                });
+                return;
+            }
+            const retryResult = await runAccount2Sync();
+            res.status(200).json({
+                ...retryResult,
+                message: `[自动重登录后] ${retryResult.message}`,
+            });
+        } catch (retryErr) {
+            const retryMessage = normalizeError(retryErr);
+            await markAccountAuthError(config.accountKey, retryMessage);
+            res.status(500).json({
+                status: 'failed',
+                message: `自动重登录后同步仍失败: ${retryMessage}`,
+            });
+        }
+    } finally {
+        syncInFlight = false;
     }
 });
 

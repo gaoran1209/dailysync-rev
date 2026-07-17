@@ -94,6 +94,19 @@
     mkdirp "^1.0.4"
     rimraf "^3.0.2"
 
+"@pinojs/redact@^0.4.0":
+  version "0.4.0"
+  resolved "https://registry.yarnpkg.com/@pinojs/redact/-/redact-0.4.0.tgz#c3de060dd12640dcc838516aa2a6803cc7b2e9d6"
+  integrity sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==
+
+"@selderee/plugin-htmlparser2@~0.12.0":
+  version "0.12.0"
+  resolved "https://registry.yarnpkg.com/@selderee/plugin-htmlparser2/-/plugin-htmlparser2-0.12.0.tgz#2ec72ba6c6032cac142f39bec71c5ecb5f348adc"
+  integrity sha512-oELmoyA6ML9jDRMV3kgcMQFKxUfBU0yFVn6yTctVaLT5ygXnxH52I3TZEgV9EhXJC68/uFvE5Daj1/25c0Xa/A==
+  dependencies:
+    domelementtype "~2.3.0"
+    domhandler "~5.0.3"
+
 "@tootallnate/once@1":
   version "1.1.2"
   resolved "https://registry.npmmirror.com/@tootallnate/once/-/once-1.1.2.tgz"
@@ -195,6 +208,15 @@
     "@types/http-errors" "*"
     "@types/mime" "*"
     "@types/node" "*"
+
+"@zone-eu/mailsplit@5.4.14":
+  version "5.4.14"
+  resolved "https://registry.yarnpkg.com/@zone-eu/mailsplit/-/mailsplit-5.4.14.tgz#5af29ae70ddb3a8897eaa3d933c9321e12481e0c"
+  integrity sha512-rz0FQOhN3Vq1XrSeSSa9+dPcaFbBxmQPjiZm6zS9oxdVHV7rOWIAYX3yP2YAUf0qBncY8CI+NogzPCmMVrMXcw==
+  dependencies:
+    libbase64 "1.3.0"
+    libmime "5.4.1"
+    libqp "2.1.1"
 
 abbrev@1:
   version "1.1.1"
@@ -328,6 +350,11 @@ asynckit@^0.4.0:
   version "0.4.0"
   resolved "https://registry.npmmirror.com/asynckit/-/asynckit-0.4.0.tgz"
   integrity sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==
+
+atomic-sleep@^1.0.0:
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/atomic-sleep/-/atomic-sleep-1.0.0.tgz#eb85b77a601fc932cfe432c5acd364a9e2c9075b"
+  integrity sha512-kNOjDqAh7px0XWNI+4QbzoiR/nTkHAWNud2uvnJquD1/x5a7EQZMJT0AczqK0Qn67oY/TTQ1LbUKajZpp3I9tQ==
 
 aws-sign2@~0.7.0:
   version "0.7.0"
@@ -728,6 +755,11 @@ decompress@^4.2.1:
     pify "^2.3.0"
     strip-dirs "^2.0.0"
 
+deepmerge-ts@^7.1.5:
+  version "7.1.5"
+  resolved "https://registry.yarnpkg.com/deepmerge-ts/-/deepmerge-ts-7.1.5.tgz#ff818564007f5c150808d2b7b732cac83aa415ab"
+  integrity sha512-HOJkrhaYsweh+W+e74Yn7YStZOilkoPb6fycpwNLKzSPtruFs48nYis0zy5yJz1+ktUhHxoRDJ27RQAWLIJVJw==
+
 delayed-stream@~1.0.0:
   version "1.0.0"
   resolved "https://registry.npmmirror.com/delayed-stream/-/delayed-stream-1.0.0.tgz"
@@ -757,6 +789,36 @@ diff@^4.0.1:
   version "4.0.2"
   resolved "https://registry.npmmirror.com/diff/-/diff-4.0.2.tgz"
   integrity sha512-58lmxKSA4BNyLz+HHMUzlOEpg09FV+ev6ZMe3vJihgdxzgcwZ8VoEEPmALCZG9LmqfVoNMMKpttIYTVG6uDY7A==
+
+dom-serializer@^2.0.0:
+  version "2.0.0"
+  resolved "https://registry.yarnpkg.com/dom-serializer/-/dom-serializer-2.0.0.tgz#e41b802e1eedf9f6cae183ce5e622d789d7d8e53"
+  integrity sha512-wIkAryiqt/nV5EQKqQpo3SToSOV9J0DnbJqwK7Wv/Trc92zIAYZ4FlMu+JPFW1DfGFt81ZTCGgDEabffXeLyJg==
+  dependencies:
+    domelementtype "^2.3.0"
+    domhandler "^5.0.2"
+    entities "^4.2.0"
+
+domelementtype@^2.3.0, domelementtype@~2.3.0:
+  version "2.3.0"
+  resolved "https://registry.yarnpkg.com/domelementtype/-/domelementtype-2.3.0.tgz#5c45e8e869952626331d7aab326d01daf65d589d"
+  integrity sha512-OLETBj6w0OsagBwdXnPdN0cnMfF9opN69co+7ZrbfPGrdpPVNBUj02spi6B1N7wChLQiPn4CSH/zJvXw56gmHw==
+
+domhandler@^5.0.2, domhandler@^5.0.3, domhandler@~5.0.3:
+  version "5.0.3"
+  resolved "https://registry.yarnpkg.com/domhandler/-/domhandler-5.0.3.tgz#cc385f7f751f1d1fc650c21374804254538c7d31"
+  integrity sha512-cgwlv/1iFQiFnU96XXgROh8xTeetsnJiDsTc7TYCLFd9+/WNkIqPTxiM/8pSd8VIrhXGTf1Ny1q1hquVqDJB5w==
+  dependencies:
+    domelementtype "^2.3.0"
+
+domutils@^3.2.2:
+  version "3.2.2"
+  resolved "https://registry.yarnpkg.com/domutils/-/domutils-3.2.2.tgz#edbfe2b668b0c1d97c24baf0f1062b132221bc78"
+  integrity sha512-6kZKyUajlDuqlHKVX1w7gyslj9MPIXzIFiz/rGu35uC1wMi+kMhQwGhl4lt9unC9Vb9INnY9Z3/ZA3+FhASLaw==
+  dependencies:
+    dom-serializer "^2.0.0"
+    domelementtype "^2.3.0"
+    domhandler "^5.0.3"
 
 duplexer2@~0.1.4:
   version "0.1.4"
@@ -795,6 +857,11 @@ encodeurl@~1.0.2:
   resolved "https://registry.npmmirror.com/encodeurl/-/encodeurl-1.0.2.tgz"
   integrity sha512-TPJXq8JqFaVYm2CWmPvnP2Iyo4ZSM7/QKcSmuMLDObfpH5fi7RUGmd/rTDf+rut/saiDiQEeVTNgAmJEdAOx0w==
 
+encoding-japanese@2.2.0:
+  version "2.2.0"
+  resolved "https://registry.yarnpkg.com/encoding-japanese/-/encoding-japanese-2.2.0.tgz#0ef2d2351250547f432a2dd155453555c16deb59"
+  integrity sha512-EuJWwlHPZ1LbADuKTClvHtwbaFn4rOD+dRAbWysqEOXRc2Uui0hJInNJrsdH0c+OhJA4nrCBdSkW4DD5YxAo6A==
+
 encoding@^0.1.12:
   version "0.1.13"
   resolved "https://registry.npmmirror.com/encoding/-/encoding-0.1.13.tgz"
@@ -808,6 +875,16 @@ end-of-stream@^1.0.0:
   integrity sha512-+uw1inIHVPQoaVuHzRyXd21icM+cnt4CzD5rW+NC1wjOUSTOs+Te7FOv7AhN7vS9x/oIyhLP5PR1H+phQAHu5Q==
   dependencies:
     once "^1.4.0"
+
+entities@^4.2.0:
+  version "4.5.0"
+  resolved "https://registry.yarnpkg.com/entities/-/entities-4.5.0.tgz#5d268ea5e7113ec74c4d033b79ea5a35a488fb48"
+  integrity sha512-V0hjH4dGPh9Ao5p0MoRY6BVqtwCjhz6vI5LT8AJ55H+4g9/4vbHx1I54fS0XuclLhDHArPQCiMjDxjaL8fPxhw==
+
+entities@^7.0.1:
+  version "7.0.1"
+  resolved "https://registry.yarnpkg.com/entities/-/entities-7.0.1.tgz#26e8a88889db63417dcb9a1e79a3f1bc92b5976b"
+  integrity sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==
 
 env-paths@^2.2.0:
   version "2.2.1"
@@ -1280,6 +1357,32 @@ has@^1.0.3:
   dependencies:
     function-bind "^1.1.1"
 
+he@1.2.0:
+  version "1.2.0"
+  resolved "https://registry.yarnpkg.com/he/-/he-1.2.0.tgz#84ae65fa7eafb165fddb61566ae14baf05664f0f"
+  integrity sha512-F/1DnUGPopORZi0ni+CvrCgHQ5FyEAHRLSApuYWMmrbSwoN2Mn/7k+Gl38gJnR7yyDZk6WLXwiGod1JOWNDKGw==
+
+html-to-text@10.0.0:
+  version "10.0.0"
+  resolved "https://registry.yarnpkg.com/html-to-text/-/html-to-text-10.0.0.tgz#70fea95d6037c12cb1df28418c95dffab06beeab"
+  integrity sha512-2OH59Gtprdczel+7Rxgpz9hGVJREaf8Lt1H4kZwWHpEn70VQKRuMNGsb2eDbwaTzrYzb0hheiOG1P7Dim0B4dQ==
+  dependencies:
+    "@selderee/plugin-htmlparser2" "~0.12.0"
+    deepmerge-ts "^7.1.5"
+    dom-serializer "^2.0.0"
+    htmlparser2 "^10.1.0"
+    selderee "~0.12.0"
+
+htmlparser2@^10.1.0:
+  version "10.1.0"
+  resolved "https://registry.yarnpkg.com/htmlparser2/-/htmlparser2-10.1.0.tgz#fe3f2e12c73b6e462d4e10395db9c1119e4d6ae4"
+  integrity sha512-VTZkM9GWRAtEpveh7MSF6SjjrpNVNNVJfFup7xTY3UpFtm67foy9HDVXneLtFVt4pMz5kZtgNcvCniNFb1hlEQ==
+  dependencies:
+    domelementtype "^2.3.0"
+    domhandler "^5.0.3"
+    domutils "^3.2.2"
+    entities "^7.0.1"
+
 http-cache-semantics@^4.1.0:
   version "4.1.1"
   resolved "https://registry.npmmirror.com/http-cache-semantics/-/http-cache-semantics-4.1.1.tgz"
@@ -1336,6 +1439,13 @@ iconv-lite@0.4.24:
   dependencies:
     safer-buffer ">= 2.1.2 < 3"
 
+iconv-lite@0.7.3:
+  version "0.7.3"
+  resolved "https://registry.yarnpkg.com/iconv-lite/-/iconv-lite-0.7.3.tgz#84ee12f963e7de50bc01a13e160a078b3b0f415f"
+  integrity sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==
+  dependencies:
+    safer-buffer ">= 2.1.2 < 3.0.0"
+
 iconv-lite@^0.6.2:
   version "0.6.3"
   resolved "https://registry.npmmirror.com/iconv-lite/-/iconv-lite-0.6.3.tgz"
@@ -1352,6 +1462,21 @@ ignore-by-default@^1.0.1:
   version "1.0.1"
   resolved "https://registry.npmmirror.com/ignore-by-default/-/ignore-by-default-1.0.1.tgz"
   integrity sha512-Ius2VYcGNk7T90CppJqcIkS5ooHUZyIQK+ClZfMfMNFEF9VSE73Fq+906u/CWu92x4gzZMWOwfFYckPObzdEbA==
+
+imapflow@^1.4.7:
+  version "1.4.7"
+  resolved "https://registry.yarnpkg.com/imapflow/-/imapflow-1.4.7.tgz#b2fc50088f845fd425781f35c093d7aa319561fc"
+  integrity sha512-nK03WfN16inwm0//0Q70T21G0g4H9ArMVyzKDRjAshOVV8iw71PP9HTpAXNmWB9giZWfPiS+ltHByi37cqwSgg==
+  dependencies:
+    "@zone-eu/mailsplit" "5.4.14"
+    encoding-japanese "2.2.0"
+    iconv-lite "0.7.3"
+    libbase64 "1.3.0"
+    libmime "5.4.1"
+    libqp "2.1.1"
+    nodemailer "9.0.3"
+    pino "10.3.1"
+    socks "2.8.9"
 
 imurmurhash@^0.1.4:
   version "0.1.4"
@@ -1380,6 +1505,11 @@ inherits@2, inherits@2.0.4, inherits@^2.0.3, inherits@~2.0.0, inherits@~2.0.3:
   version "2.0.4"
   resolved "https://registry.npmmirror.com/inherits/-/inherits-2.0.4.tgz"
   integrity sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==
+
+ip-address@^10.1.1:
+  version "10.2.0"
+  resolved "https://registry.yarnpkg.com/ip-address/-/ip-address-10.2.0.tgz#805fc178b20c518bd4c8548b24fe30892d7f3206"
+  integrity sha512-/+S6j4E9AHvW9SWMSEY9Xfy66O5PWvVEJ08O0y5JGyEKQpojb0K0GKpz/v5HJ/G0vi3D2sjGK78119oXZeE0qA==
 
 ip@^2.0.0:
   version "2.0.0"
@@ -1514,6 +1644,38 @@ jws@^4.0.0:
     jwa "^2.0.0"
     safe-buffer "^5.0.1"
 
+leac@^0.7.0:
+  version "0.7.0"
+  resolved "https://registry.yarnpkg.com/leac/-/leac-0.7.0.tgz#27632daa46e58b4fa36178bcbeb10bf1d4a1699a"
+  integrity sha512-qMrZeyEekgdRQ9o6a4NAB2EQZrv827GJdn1vnapwSJ90hWRB4TzUSunvacPkxQ2TnNqHNI1/zSt0hlo0crG8Jw==
+
+libbase64@1.3.0:
+  version "1.3.0"
+  resolved "https://registry.yarnpkg.com/libbase64/-/libbase64-1.3.0.tgz#053314755a05d2e5f08bbfc48d0290e9322f4406"
+  integrity sha512-GgOXd0Eo6phYgh0DJtjQ2tO8dc0IVINtZJeARPeiIJqge+HdsWSuaDTe8ztQ7j/cONByDZ3zeB325AHiv5O0dg==
+
+libmime@5.4.1:
+  version "5.4.1"
+  resolved "https://registry.yarnpkg.com/libmime/-/libmime-5.4.1.tgz#8cd717bcd0a8d7e13205ae84fa234e158e4ea8ad"
+  integrity sha512-0wHGhsofo9IdQPenr3BBHXuxcwMq4atFUTsZ9Ogc1OvI5h4rUdDIrBQEN9JHjCXfDMrE59LUMJWsTD82wTYk8A==
+  dependencies:
+    encoding-japanese "2.2.0"
+    iconv-lite "0.7.3"
+    libbase64 "1.3.0"
+    libqp "2.1.1"
+
+libqp@2.1.1:
+  version "2.1.1"
+  resolved "https://registry.yarnpkg.com/libqp/-/libqp-2.1.1.tgz#f1be767a58f966f500597997cab72cfc1e17abfa"
+  integrity sha512-0Wd+GPz1O134cP62YU2GTOPNA7Qgl09XwCqM5zpBv87ERCXdfDtyKXvV7c9U22yWJh44QZqBocFnXN11K96qow==
+
+linkify-it@5.0.2:
+  version "5.0.2"
+  resolved "https://registry.yarnpkg.com/linkify-it/-/linkify-it-5.0.2.tgz#d3be0a693af3da9df3883f1e346a0e97461a8c19"
+  integrity sha512-ONTm2jCMAVZjgQa/Fy1kScXsuOoF5NPTsoFBdE1KVIZ2vAh/r9+Bqo+0jINCBYnavTPQZz38QzFTme79ENoN3Q==
+  dependencies:
+    uc.micro "^2.0.0"
+
 listenercount@~1.0.1:
   version "1.0.1"
   resolved "https://registry.npmmirror.com/listenercount/-/listenercount-1.0.1.tgz"
@@ -1535,6 +1697,22 @@ luxon@^3.4.3:
   version "3.4.3"
   resolved "https://registry.npmmirror.com/luxon/-/luxon-3.4.3.tgz"
   integrity sha512-tFWBiv3h7z+T/tDaoxA8rqTxy1CHV6gHS//QdaH4pulbq/JuBSGgQspQQqcgnwdAx6pNI7cmvz5Sv/addzHmUg==
+
+mailparser@^3.9.14:
+  version "3.9.14"
+  resolved "https://registry.yarnpkg.com/mailparser/-/mailparser-3.9.14.tgz#cbd7f63eb6f984bf27dd931e1cec4dcc27a58a89"
+  integrity sha512-3QD6TRXcyXtq2NCuyA2AEjqmallQkyxYmZI9GMCIvQDCaB9Uc034WUI1x8RUBYFnk5+p7h14JEz4O/lrxQmttw==
+  dependencies:
+    "@zone-eu/mailsplit" "5.4.14"
+    encoding-japanese "2.2.0"
+    he "1.2.0"
+    html-to-text "10.0.0"
+    iconv-lite "0.7.3"
+    libmime "5.4.1"
+    linkify-it "5.0.2"
+    nodemailer "9.0.3"
+    punycode.js "2.3.1"
+    tlds "1.261.0"
 
 make-dir@^1.0.0:
   version "1.3.0"
@@ -1759,6 +1937,11 @@ node-gyp@8.x:
     tar "^6.1.2"
     which "^2.0.2"
 
+nodemailer@9.0.3:
+  version "9.0.3"
+  resolved "https://registry.yarnpkg.com/nodemailer/-/nodemailer-9.0.3.tgz#ce84f8046977b616847ad56130aa30bdb3c67c1f"
+  integrity sha512-n+YP+NKwR5zRWa60k3GiQ6Q3B4KXCoAw40dAKeCtYn020iNN74aWK2liXIC3ZEATeGql7we3tE3t8QwhY0eskw==
+
 nodemon@^2.0.9:
   version "2.0.22"
   resolved "https://registry.npmmirror.com/nodemon/-/nodemon-2.0.22.tgz"
@@ -1834,6 +2017,11 @@ object-inspect@^1.9.0:
   resolved "https://registry.npmmirror.com/object-inspect/-/object-inspect-1.12.3.tgz"
   integrity sha512-geUvdk7c+eizMNUDkRpW1wJwgfOiOeHbxBR/hLXK1aT6zmVSO0jsQcs7fj6MGw89jC/cjGfLcNOrtMYtGqm81g==
 
+on-exit-leak-free@^2.1.0:
+  version "2.1.2"
+  resolved "https://registry.yarnpkg.com/on-exit-leak-free/-/on-exit-leak-free-2.1.2.tgz#fed195c9ebddb7d9e4c3842f93f281ac8dadd3b8"
+  integrity sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==
+
 on-finished@2.4.1:
   version "2.4.1"
   resolved "https://registry.npmmirror.com/on-finished/-/on-finished-2.4.1.tgz"
@@ -1855,6 +2043,14 @@ p-map@^4.0.0:
   dependencies:
     aggregate-error "^3.0.0"
 
+parseley@~0.13.1:
+  version "0.13.1"
+  resolved "https://registry.yarnpkg.com/parseley/-/parseley-0.13.1.tgz#1dfc3dd43afee3414367a548e8072f2ef77b2a52"
+  integrity sha512-uNBJZzmb60l6p6VWLTmevizNAGnE0xoSf1n0B4q3ntegDNzcS68NRCcBDZTcyXHxt2XhBChsCuqj4M+nChvE/A==
+  dependencies:
+    leac "^0.7.0"
+    peberminta "^0.10.0"
+
 parseurl@~1.3.3:
   version "1.3.3"
   resolved "https://registry.npmmirror.com/parseurl/-/parseurl-1.3.3.tgz"
@@ -1869,6 +2065,11 @@ path-to-regexp@0.1.7:
   version "0.1.7"
   resolved "https://registry.npmmirror.com/path-to-regexp/-/path-to-regexp-0.1.7.tgz"
   integrity sha512-5DFkuoqlv1uYQKxy8omFBeJPQcdoE07Kv2sferDCrAq1ohOU+MSDswDIbnx3YAM60qIOnYa53wBhXW0EbMonrQ==
+
+peberminta@^0.10.0:
+  version "0.10.0"
+  resolved "https://registry.yarnpkg.com/peberminta/-/peberminta-0.10.0.tgz#307eb09c747891baa4ba13bc6e896d83147da354"
+  integrity sha512-80B2AsU+I4Qdb0ZAPSfe9UwvGzwkM37IKIFEvdS3D/3Ndgv2bsuJ0bfG1+iEYO+l7Gfd4EUJmuRyq7efLgRMzQ==
 
 pend@~1.2.0:
   version "1.2.0"
@@ -1907,6 +2108,35 @@ pinkie@^2.0.0:
   resolved "https://registry.npmmirror.com/pinkie/-/pinkie-2.0.4.tgz"
   integrity sha512-MnUuEycAemtSaeFSjXKW/aroV7akBbY+Sv+RkyqFjgAe73F+MR0TBWKBRDkmfWq/HiFmdavfZ1G7h4SPZXaCSg==
 
+pino-abstract-transport@^3.0.0:
+  version "3.0.0"
+  resolved "https://registry.yarnpkg.com/pino-abstract-transport/-/pino-abstract-transport-3.0.0.tgz#b21e5f33a297e8c4c915c62b3ce5dd4a87a52c23"
+  integrity sha512-wlfUczU+n7Hy/Ha5j9a/gZNy7We5+cXp8YL+X+PG8S0KXxw7n/JXA3c46Y0zQznIJ83URJiwy7Lh56WLokNuxg==
+  dependencies:
+    split2 "^4.0.0"
+
+pino-std-serializers@^7.0.0:
+  version "7.1.0"
+  resolved "https://registry.yarnpkg.com/pino-std-serializers/-/pino-std-serializers-7.1.0.tgz#a7b0cd65225f29e92540e7853bd73b07479893fc"
+  integrity sha512-BndPH67/JxGExRgiX1dX0w1FvZck5Wa4aal9198SrRhZjH3GxKQUKIBnYJTdj2HDN3UQAS06HlfcSbQj2OHmaw==
+
+pino@10.3.1:
+  version "10.3.1"
+  resolved "https://registry.yarnpkg.com/pino/-/pino-10.3.1.tgz#6552c8f8d8481844c9e452e7bf0be90bff1939ce"
+  integrity sha512-r34yH/GlQpKZbU1BvFFqOjhISRo1MNx1tWYsYvmj6KIRHSPMT2+yHOEb1SG6NMvRoHRF0a07kCOox/9yakl1vg==
+  dependencies:
+    "@pinojs/redact" "^0.4.0"
+    atomic-sleep "^1.0.0"
+    on-exit-leak-free "^2.1.0"
+    pino-abstract-transport "^3.0.0"
+    pino-std-serializers "^7.0.0"
+    process-warning "^5.0.0"
+    quick-format-unescaped "^4.0.3"
+    real-require "^0.2.0"
+    safe-stable-stringify "^2.3.1"
+    sonic-boom "^4.0.1"
+    thread-stream "^4.0.0"
+
 playwright-core@1.58.2:
   version "1.58.2"
   resolved "https://registry.npmjs.org/playwright-core/-/playwright-core-1.58.2.tgz"
@@ -1925,6 +2155,11 @@ process-nextick-args@~2.0.0:
   version "2.0.1"
   resolved "https://registry.npmmirror.com/process-nextick-args/-/process-nextick-args-2.0.1.tgz"
   integrity sha512-3ouUOpQhtgrbOa17J7+uxOTpITYWaGP7/AhoR3+A+/1e9skrzelGi/dXzEYyvbxubEF6Wn2ypscTKiKJFFn1ag==
+
+process-warning@^5.0.0:
+  version "5.0.0"
+  resolved "https://registry.yarnpkg.com/process-warning/-/process-warning-5.0.0.tgz#566e0bf79d1dff30a72d8bbbe9e8ecefe8d378d7"
+  integrity sha512-a39t9ApHNx2L4+HBnQKqxxHNs1r7KF+Intd8Q/g1bUh6q0WIp9voPXJ/x0j+ZL45KF1pJd9+q2jLIRMfvEshkA==
 
 promise-inflight@^1.0.1:
   version "1.0.1"
@@ -1962,6 +2197,11 @@ pstree.remy@^1.1.8:
   resolved "https://registry.npmmirror.com/pstree.remy/-/pstree.remy-1.1.8.tgz"
   integrity sha512-77DZwxQmxKnu3aR542U+X8FypNzbfJ+C5XQDk3uWjWxn6151aIMGthWYRXTqT1E5oJvg+ljaa2OJi+VfvCOQ8w==
 
+punycode.js@2.3.1:
+  version "2.3.1"
+  resolved "https://registry.yarnpkg.com/punycode.js/-/punycode.js-2.3.1.tgz#6b53e56ad75588234e79f4affa90972c7dd8cdb7"
+  integrity sha512-uxFIHU0YlHYhDQtV4R9J6a52SLx28BCjT+4ieh7IGbgwVJWO+km431c4yRlREUAsAmt/uMjQUyQHNEPf0M39CA==
+
 punycode@^2.1.0, punycode@^2.1.1:
   version "2.3.0"
   resolved "https://registry.npmmirror.com/punycode/-/punycode-2.3.0.tgz"
@@ -1985,6 +2225,11 @@ qs@~6.5.2:
   version "6.5.3"
   resolved "https://registry.npmmirror.com/qs/-/qs-6.5.3.tgz"
   integrity sha512-qxXIEh4pCGfHICj1mAJQ2/2XVZkjCDTcEgfoSQxc/fYivUZxTkk7L3bDBJSoNrEzXI17oUO5Dp07ktqE5KzczA==
+
+quick-format-unescaped@^4.0.3:
+  version "4.0.4"
+  resolved "https://registry.yarnpkg.com/quick-format-unescaped/-/quick-format-unescaped-4.0.4.tgz#93ef6dd8d3453cbc7970dd614fad4c5954d6b5a7"
+  integrity sha512-tYC1Q1hgyRuHgloV/YXs2w15unPVh8qfu/qCTfhTYamaw7fyhumKa2yGpdSo87vY32rIclj+4fWYQXUMs9EHvg==
 
 range-parser@~1.2.1:
   version "1.2.1"
@@ -2029,6 +2274,16 @@ readdirp@~3.6.0:
   integrity sha512-hOS089on8RduqdbhvQ5Z37A0ESjsqz6qnRcffsMU3495FuTdqSm+7bhJ29JvIOsBDEEnan5DPu9t3To9VRlMzA==
   dependencies:
     picomatch "^2.2.1"
+
+real-require@^0.2.0:
+  version "0.2.0"
+  resolved "https://registry.yarnpkg.com/real-require/-/real-require-0.2.0.tgz#209632dea1810be2ae063a6ac084fee7e33fba78"
+  integrity sha512-57frrGM/OCTLqLOAh0mhVA9VBMHd+9U7Zb2THMGdBUoZVOtGbJzjxsYGDJ3A9AYYCP4hn6y1TVbaOfzWtm5GFg==
+
+real-require@^1.0.0:
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/real-require/-/real-require-1.0.0.tgz#e4f0a3737e8060c513b60c2652c58b8ef56bc8a9"
+  integrity sha512-P4nbQYQfePJxRSmY+v/KINxVucm4NF3p3s7pJveMTtom52FR4YGltUQLB8idDXwDDWW+eYrWDFbuzUnjoWHF7g==
 
 request-promise-core@1.1.4:
   version "1.1.4"
@@ -2102,6 +2357,11 @@ safe-buffer@^5.1.1, safe-buffer@~5.1.0, safe-buffer@~5.1.1:
   resolved "https://registry.npmmirror.com/safe-buffer/-/safe-buffer-5.1.2.tgz"
   integrity sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g==
 
+safe-stable-stringify@^2.3.1:
+  version "2.5.0"
+  resolved "https://registry.yarnpkg.com/safe-stable-stringify/-/safe-stable-stringify-2.5.0.tgz#4ca2f8e385f2831c432a719b108a3bf7af42a1dd"
+  integrity sha512-b3rppTKm9T+PsVCBEOUR46GWI7fdOs00VKZ1+9c1EWDaDMvjQc6tUwuFyIprgGgTcWoVHSKrU8H31ZHA2e0RHA==
+
 "safer-buffer@>= 2.1.2 < 3", "safer-buffer@>= 2.1.2 < 3.0.0", safer-buffer@^2.0.2, safer-buffer@^2.1.0, safer-buffer@~2.1.0:
   version "2.1.2"
   resolved "https://registry.npmmirror.com/safer-buffer/-/safer-buffer-2.1.2.tgz"
@@ -2113,6 +2373,13 @@ seek-bzip@^1.0.5:
   integrity sha512-e1QtP3YL5tWww8uKaOCQ18UxIT2laNBXHjV/S2WYCiK4udiv8lkG89KRIoCjUagnAmCBurjF4zEVX2ByBbnCjQ==
   dependencies:
     commander "^2.8.1"
+
+selderee@~0.12.0:
+  version "0.12.0"
+  resolved "https://registry.yarnpkg.com/selderee/-/selderee-0.12.0.tgz#996d5a174814905431e849d150e6dba536bfee88"
+  integrity sha512-b1YMh3+DHZp59DLna3qVwQ5iOla/nrI6mLBNW02XxU77M3046Df6VLkoaJyFz20VsGIG5kkp+FK0kg4K4HnUFw==
+  dependencies:
+    parseley "~0.13.1"
 
 semver@^5.7.1:
   version "5.7.2"
@@ -2215,6 +2482,14 @@ socks-proxy-agent@^6.0.0:
     debug "^4.3.3"
     socks "^2.6.2"
 
+socks@2.8.9:
+  version "2.8.9"
+  resolved "https://registry.yarnpkg.com/socks/-/socks-2.8.9.tgz#aa5f130ca0f88a43fa44faf4869c50d22aa27752"
+  integrity sha512-LJhUYUvItdQ0LkJTmPeaEObWXAqFyfmP85x0tch/ez9cahmhlBBLbIqDFnvBnUJGagb0JbIQrkBs1wJ+yRYpEw==
+  dependencies:
+    ip-address "^10.1.1"
+    smart-buffer "^4.2.0"
+
 socks@^2.6.2:
   version "2.7.1"
   resolved "https://registry.npmmirror.com/socks/-/socks-2.7.1.tgz"
@@ -2222,6 +2497,18 @@ socks@^2.6.2:
   dependencies:
     ip "^2.0.0"
     smart-buffer "^4.2.0"
+
+sonic-boom@^4.0.1:
+  version "4.2.1"
+  resolved "https://registry.yarnpkg.com/sonic-boom/-/sonic-boom-4.2.1.tgz#28598250df4899c0ac572d7e2f0460690ba6a030"
+  integrity sha512-w6AxtubXa2wTXAUsZMMWERrsIRAdrK0Sc+FUytWvYAhBJLyuI4llrMIC1DtlNSdI99EI86KZum2MMq3EAZlF9Q==
+  dependencies:
+    atomic-sleep "^1.0.0"
+
+split2@^4.0.0:
+  version "4.2.0"
+  resolved "https://registry.yarnpkg.com/split2/-/split2-4.2.0.tgz#c9c5920904d148bab0b9f67145f245a86aadbfa4"
+  integrity sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg==
 
 sqlite3@^5.1.2:
   version "5.1.6"
@@ -2349,10 +2636,22 @@ tar@^6.0.2, tar@^6.1.11, tar@^6.1.2:
     mkdirp "^1.0.3"
     yallist "^4.0.0"
 
+thread-stream@^4.0.0:
+  version "4.2.0"
+  resolved "https://registry.yarnpkg.com/thread-stream/-/thread-stream-4.2.0.tgz#054063e93baab22363d05b784d6c7e439230cac7"
+  integrity sha512-e2zZ96wSChazBsbENf/Pcm/4swHt2cEKQ92rhUjkL9GCKiTDJIaTBenjE/m9DXi0QBmTMDkFDdOomUy20A1tDQ==
+  dependencies:
+    real-require "^1.0.0"
+
 through@^2.3.8:
   version "2.3.8"
   resolved "https://registry.npmmirror.com/through/-/through-2.3.8.tgz"
   integrity sha512-w89qg7PI8wAdvX60bMDP+bFoD5Dvhm9oLheFp5O4a2QF0cSBGsBX4qZmadPMvVqlLJBBci+WqGGOAPvcDeNSVg==
+
+tlds@1.261.0:
+  version "1.261.0"
+  resolved "https://registry.yarnpkg.com/tlds/-/tlds-1.261.0.tgz#055e412e92f01f84a9c8ac0504d3472d68b3c4c9"
+  integrity sha512-QXqwfEl9ddlGBaRFXIvNKK6OhipSiLXuRuLJX5DErz0o0Q0rYxulWLdFryTkV5PkdZct5iMInwYEGe/eR++1AA==
 
 to-buffer@^1.1.1:
   version "1.1.1"
@@ -2444,6 +2743,11 @@ typescript@^4.3.5:
   version "4.9.5"
   resolved "https://registry.npmmirror.com/typescript/-/typescript-4.9.5.tgz"
   integrity sha512-1FXk9E2Hm+QzZQ7z+McJiHL4NW1F2EzMu9Nq9i3zAaGqibafqYwCVU6WyWAuyQRRzOlxou8xZSyXLEN8oKj24g==
+
+uc.micro@^2.0.0:
+  version "2.1.0"
+  resolved "https://registry.yarnpkg.com/uc.micro/-/uc.micro-2.1.0.tgz#f8d3f7d0ec4c3dea35a7e3c8efa4cb8b45c9e7ee"
+  integrity sha512-ARDJmphmdvUk6Glw7y9DQ2bFkKBHwQHLi2lsaH6PPmz/Ka9sFOBsBluozhDltWmnv9u/cF6Rt87znRTPV+yp/A==
 
 unbzip2-stream@^1.0.9:
   version "1.4.3"

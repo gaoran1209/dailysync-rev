@@ -32,3 +32,9 @@ _site/
 .idea
 
 config.yaml
+
+# MFA 中间状态与本地 sqlite WAL 文件不入库
+db/mfa_state.json
+db/*.db-shm
+db/*.db-wal
+.maestro/

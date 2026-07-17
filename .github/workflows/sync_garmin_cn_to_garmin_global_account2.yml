@@ -29,7 +29,12 @@ jobs:
 
           echo "HTTP ${http_code}, status=${sync_status}"
 
-          if [ "${http_code}" = "200" ] && { [ "${sync_status}" = "ok" ] || [ "${sync_status}" = "no_new_data" ]; }; then
+          if [ "${http_code}" = "200" ] && { [ "${sync_status}" = "ok" ] || [ "${sync_status}" = "no_new_data" ] || [ "${sync_status}" = "partial" ] || [ "${sync_status}" = "skipped" ]; }; then
+            exit 0
+          fi
+
+          if [ "${http_code}" = "409" ] && [ "${sync_status}" = "busy" ]; then
+            echo "另一个同步任务正在执行，本次跳过"
             exit 0
           fi
 

@@ -37,8 +37,10 @@ export interface GarminSyncOptions {
 }
 
 export interface GarminSyncResult {
-    status: 'ok' | 'no_new_data';
+    status: 'ok' | 'no_new_data' | 'partial';
     uploadedCount: number;
+    failedCount?: number;
+    skippedCount?: number;
     message: string;
     latestSourceStartTime?: string;
     latestTargetStartTime?: string;

@@ -1,8 +1,0 @@
-{
-  "csrf": "E50BD1A52F290B7912508F54BA82609ED12F884198DAF039D8263FED7759075CEC80A6A9C148489A08034C473BA1F5C2B4E4",
-  "cookies": "ADRUM_BTa=R:881|g:05775b86-d378-4574-98e5-43c2bcd62d00|n:garmin_869629ee-d273-481d-b5a4-f4b0a8c4d5a3; SameSite=None; ADRUM_BT1=R:881|i:203200|t:1771549193560; org.springframework.web.servlet.i18n.CookieLocaleResolver.LOCALE=zh_CN; SESSION=ba9fe27c-ebb3-476c-aad3-e5aa72f08a5e; __VCAP_ID__=dbb85eb3-83d7-4d38-557a-9a65; __cf_bm=7yvpu0F_IYZWokpf8.BpmGMvSCGd4DUspnqZXbsCWuA-1771549192-1.0.1.1-dJR9xY6z.Ro7_qjIpM0pCledNFmBvmvAVyZgx3XA5CePkhfRvDTxrO.gY2PVNVnXpzOLrKJX0SchZffTAPuTxEU9QnI1SINmG6G6Y1ccCHc; _cfuvid=T1pMYhBTCeY62hMm8U5aJPKEK5zdqzxyAuIb6DZMkHk-1771549192962-0.0.1.1-604800000",
-  "timestamp": 1771549194183,
-  "username": "18380445747@163.com",
-  "fromPage": "loginEnterMfaCode",
-  "verifyPath": "/sso/verifyMFA/loginEnterMfaCode"
-}
