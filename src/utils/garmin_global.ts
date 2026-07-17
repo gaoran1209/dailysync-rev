@@ -25,6 +25,12 @@ interface ResolvedGarminGlobalOptions {
     sessionUser: string;
 }
 
+function isRateLimited(err: any): boolean {
+    const status = err?.response?.status ?? err?.status;
+    if (status === 429) return true;
+    return /\b429\b|too many requests|rate limit/i.test(String(err?.message ?? ''));
+}
+
 function resolveGlobalOptions(options: GarminLoginOptions = {}): ResolvedGarminGlobalOptions {
     const username = (options.username ?? GARMIN_GLOBAL_USERNAME)?.trim();
     const password = (options.password ?? GARMIN_GLOBAL_PASSWORD)?.trim();
@@ -50,6 +56,10 @@ export const getGaminGlobalClient = async (options: GarminLoginOptions = {}): Pr
             await GCClient.login();
             await saveSessionToDB('GLOBAL', GCClient.exportToken(), config.sessionUser);
         } catch (loginErr) {
+            if (isRateLimited(loginErr)) {
+                // 国际区登录被限流（多为短时间多次登录导致），本次跳过，稍后自动重试
+                throw new Error(`TRANSIENT_ERROR: 佳明国际区登录被限流(429)，本次跳过，稍后重试`);
+            }
             const errMsg = `佳明国际区首次登录失败: ${loginErr.message}`;
             console.error(errMsg);
             await sendBarkNotification('Garmin Global 登录失败', errMsg);
@@ -65,6 +75,9 @@ export const getGaminGlobalClient = async (options: GarminLoginOptions = {}): Pr
                 await GCClient.login(config.username, config.password);
                 await updateSessionToDB('GLOBAL', GCClient.exportToken(), config.sessionUser);
             } catch (loginErr) {
+                if (isRateLimited(loginErr)) {
+                    throw new Error(`TRANSIENT_ERROR: 佳明国际区重新登录被限流(429)，本次跳过，稍后重试`);
+                }
                 const errMsg = `佳明国际区 Token 过期且重新登录失败: ${loginErr.message}`;
                 console.error(errMsg);
                 await sendBarkNotification('Garmin Global 登录失败', errMsg);

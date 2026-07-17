@@ -4,7 +4,7 @@ import { clearAdminSession, isAdminAuthenticated, issueAdminSession, validateAdm
 import { account2AuthService } from './service/account2_auth';
 import { renderAdminLoginPage, renderAdminPage } from './service/account2_ui';
 import { getAccount2ServiceConfig } from './service/config';
-import { initDB, markAccountAuthError, markAccountAuthReauthRequired } from './utils/sqlite';
+import { initDB, markAccountAuthError, markAccountAuthReady, markAccountAuthReauthRequired } from './utils/sqlite';
 
 const config = getAccount2ServiceConfig();
 const app = express();
@@ -177,12 +177,24 @@ app.post('/api/hooks/sync/account2', requireWebhookToken, async (_req, res) => {
                 return;
             }
             const retryResult = await runAccount2Sync();
+            // 重登录成功 → 恢复 ready 状态（CN 登录态已就绪）
+            await markAccountAuthReady(config.accountKey);
             res.status(200).json({
                 ...retryResult,
                 message: `[自动重登录后] ${retryResult.message}`,
             });
         } catch (retryErr) {
             const retryMessage = normalizeError(retryErr);
+            // 重登录成功但同步遇到瞬时错误（如国际区 429 限流）：CN 登录态有效，本次跳过
+            if (retryMessage.includes('TRANSIENT_ERROR')) {
+                console.log('[Sync] 重登录成功，但同步遇瞬时错误，跳过本次:', retryMessage);
+                await markAccountAuthReady(config.accountKey);
+                res.status(200).json({
+                    status: 'skipped',
+                    message: `重登录成功，同步稍后重试: ${retryMessage}`,
+                });
+                return;
+            }
             await markAccountAuthError(config.accountKey, retryMessage);
             res.status(500).json({
                 status: 'failed',
