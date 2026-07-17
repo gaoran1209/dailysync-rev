@@ -67,6 +67,19 @@
 - `MAIL_IMAP_PASSWORD`（邮箱 IMAP 授权码，用于自动读取验证码；不配则回退人工补码）
 - `MAIL_IMAP_HOST` / `MAIL_IMAP_PORT` / `MAIL_IMAP_USER`（均可选，默认 163）
 
+### 国际区（garmin.com）429 说明与 Token 导入
+2026-03 起 Garmin 在国际区 SSO 前启用了 Cloudflare 机器人检测，**在服务器/数据中心 IP 上做国际区密码登录会被 429 拦截**（中国区 garmin.cn 不受影响）。反复重试还会升级为账号级封锁（48-72h）。因此账号2 的国际区登录改为「本地导出 token → 注入 EC2」，之后 EC2 只刷新不登录：
+
+1. 在**家庭网络**、项目根目录本地运行（凭据从 `.env` 或命令行读取，不上传服务器）：
+   ```shell
+   GARMIN_GLOBAL_USERNAME_2=你的国际区账号 GARMIN_GLOBAL_PASSWORD_2=密码 yarn export_global_token
+   ```
+   成功后终端会打印一段 token JSON。
+2. 打开 `${APP_BASE_URL}/admin` 登录后，把 JSON 粘贴到「导入国际区 Token」并提交。
+3. 之后账号2 的定时同步会用这个 token（OAuth1 约 1 年有效，OAuth2 自动刷新），不再触发国际区登录。
+> 若导出时也报 429，说明该国际区账号仍在账号级封锁窗口内，等 48-72h 后再导出。
+> 库已升级到 `@gooin/garmin-connect@1.8.7`（上游针对该封锁的登录修复），但数据中心 IP 上仍不保证 fresh login 成功，token 导入是更可靠的方式。
+
 ### Account 2 使用方式
 
 1. 把代码 push 到 `main`，等待 `Deploy Account 2 Service to EC2` workflow 完成部署。
