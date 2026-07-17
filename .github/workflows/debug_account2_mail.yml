@@ -1,0 +1,21 @@
+name: Debug Account 2 Mail
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug-mail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query account2 mail diagnostic
+        env:
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          ACCOUNT2_SYNC_WEBHOOK_TOKEN: ${{ secrets.ACCOUNT2_SYNC_WEBHOOK_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -sS -X GET "${APP_BASE_URL%/}/api/hooks/debug/mail" \
+            -H "Authorization: Bearer ${ACCOUNT2_SYNC_WEBHOOK_TOKEN}" | tee mail-debug.json
+          echo
+          echo "--- parsed ---"
+          node -e "const d=require('./mail-debug.json'); console.log('now:', d.now); console.log('mailUser:', d.mailUser); (d.entries||[]).forEach(e=>console.log([e.internalDate, e.ageSecondsFromNow+'s前', e.isGarmin?'GARMIN':'-', 'code='+e.extractedCodeMasked, '| '+e.subject, '| '+e.fromText].join('  ')));"

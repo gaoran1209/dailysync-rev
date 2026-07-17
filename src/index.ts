@@ -89,6 +89,21 @@ app.post('/api/admin/account2/login/auto', requireAdmin, async (_req, res) => {
     res.json(await account2AuthService.autoLogin());
 });
 
+// 诊断：查看最近邮件与提取到的（脱敏）验证码，用 webhook token 保护
+app.get('/api/hooks/debug/mail', requireWebhookToken, async (_req, res) => {
+    try {
+        const { diagnoseGarminMails } = require('./service/mail_code_fetcher');
+        if (!config.mail) {
+            res.status(400).json({ status: 'no_mail_config', message: '未配置 MAIL_IMAP_PASSWORD' });
+            return;
+        }
+        const result = await diagnoseGarminMails(config.mail);
+        res.status(200).json({ status: 'ok', mailUser: config.mail.user, host: config.mail.host, ...result });
+    } catch (err) {
+        res.status(500).json({ status: 'failed', message: normalizeError(err) });
+    }
+});
+
 function runAccount2Sync() {
     return syncGarminCN2GarminGlobal({
         cn: {

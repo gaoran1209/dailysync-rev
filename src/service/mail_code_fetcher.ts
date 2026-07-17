@@ -120,6 +120,72 @@ async function fetchCodeOnce(config: MailFetcherConfig, sinceMs: number): Promis
     }
 }
 
+export interface MailDiagnosticEntry {
+    fromText: string;
+    subject: string;
+    internalDate: string;
+    ageSecondsFromNow: number;
+    isGarmin: boolean;
+    extractedCodeMasked: string | null;
+}
+
+/**
+ * 诊断用：返回收件箱最近若干封邮件的元数据（验证码做脱敏），
+ * 用于排查“取到的码是否是本次登录触发的最新邮件”。不提交、不改状态。
+ */
+export async function diagnoseGarminMails(
+    config: MailFetcherConfig,
+    lookbackMs = 60 * 60 * 1000,
+): Promise<{ now: string; entries: MailDiagnosticEntry[] }> {
+    const client = new ImapFlow({
+        host: config.host,
+        port: config.port,
+        secure: config.secure,
+        auth: { user: config.user, pass: config.password },
+        logger: false,
+        clientInfo: { name: 'DailySyncMailFetcher', version: '1.0.0', vendor: 'dailysync' },
+    });
+    const now = Date.now();
+    const entries: MailDiagnosticEntry[] = [];
+    await client.connect();
+    try {
+        const lock = await client.getMailboxLock('INBOX');
+        try {
+            const sinceDate = new Date(now - lookbackMs - 24 * 60 * 60 * 1000);
+            const uids: number[] = await client.search({ since: sinceDate }, { uid: true });
+            const candidates = (uids || []).slice(-15).reverse();
+            for (const uid of candidates) {
+                const message = await client.fetchOne(uid, { envelope: true, internalDate: true, source: true }, { uid: true });
+                if (!message) continue;
+                const internalMs = message.internalDate ? new Date(message.internalDate).getTime() : 0;
+                const fromText = (message.envelope?.from ?? []).map((f: any) => `${f.name ?? ''} <${f.address ?? ''}>`).join(', ');
+                const subject = message.envelope?.subject ?? '';
+                const isGarmin = GARMIN_SENDER_PATTERN.test(fromText) || GARMIN_SENDER_PATTERN.test(subject);
+                let code: string | null = extractCodeFromText(subject);
+                if (!code && message.source) {
+                    try {
+                        const parsed = await simpleParser(message.source);
+                        code = extractCodeFromText(parsed.text) ?? extractCodeFromText(parsed.html ? String(parsed.html) : null);
+                    } catch { /* ignore */ }
+                }
+                entries.push({
+                    fromText,
+                    subject,
+                    internalDate: internalMs ? new Date(internalMs).toISOString() : 'unknown',
+                    ageSecondsFromNow: internalMs ? Math.round((now - internalMs) / 1000) : -1,
+                    isGarmin,
+                    extractedCodeMasked: code ? `${code.slice(0, 2)}xxxx` : null,
+                });
+            }
+        } finally {
+            lock.release();
+        }
+    } finally {
+        await client.logout().catch(() => undefined);
+    }
+    return { now: new Date(now).toISOString(), entries };
+}
+
 /**
  * 轮询邮箱直到拿到 Garmin MFA 验证码或超时
  */
