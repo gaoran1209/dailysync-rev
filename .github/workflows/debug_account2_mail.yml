@@ -18,4 +18,4 @@ jobs:
             -H "Authorization: Bearer ${ACCOUNT2_SYNC_WEBHOOK_TOKEN}" | tee mail-debug.json
           echo
           echo "--- parsed ---"
-          node -e "const d=require('./mail-debug.json'); console.log('now:', d.now); console.log('mailUser:', d.mailUser); (d.entries||[]).forEach(e=>console.log([e.internalDate, e.ageSecondsFromNow+'s前', e.isGarmin?'GARMIN':'-', 'code='+e.extractedCodeMasked, '| '+e.subject, '| '+e.fromText].join('  ')));"
+          node -e "const d=require('./mail-debug.json'); console.log('now:', d.now); console.log('mailUser:', d.mailUser); (d.entries||[]).forEach(e=>{console.log([e.internalDate, e.ageSecondsFromNow+'s前', e.isGarmin?'GARMIN':'-', 'pick='+e.extractedCodeMasked, '| '+e.subject].join('  ')); if(e.isGarmin){console.log('    textCandidates:', JSON.stringify(e.textCandidates)); console.log('    htmlCandidates:', JSON.stringify(e.htmlCandidates));}});"

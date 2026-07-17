@@ -26,16 +26,58 @@ export interface FetchCodeOptions {
 }
 
 const GARMIN_SENDER_PATTERN = /garmin/i;
-const CODE_PATTERN = /\b(\d{6})\b/;
+// 关键词附近的 6 位码（“验证码/安全密码/code/verification …… 123456”），优先级最高
+const KEYWORD_CODE_PATTERN = /(?:验证码|安全密码|verification code|security code|passcode|one[- ]?time)[^\d]{0,40}(\d{6})/i;
+const CODE_PATTERN = /\b(\d{6})\b/g;
 
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * 判断一个 6 位串是否明显不是验证码（颜色值/年份/占位等）
+ * 例如 000000（黑色 #000000）、111111、202601 等。
+ */
+function isImplausibleCode(code: string): boolean {
+    if (/^(\d)\1{5}$/.test(code)) return true;           // 全相同数字：000000 / 111111
+    if (/^20\d{4}$/.test(code) && Number(code.slice(2, 4)) <= 12) {
+        // 形如 2026xx 的日期/年份前缀，且第 3-4 位是合法月份，较可能是日期戳
+        return true;
+    }
+    return false;
+}
+
 function extractCodeFromText(text: string | undefined | null): string | null {
     if (!text) return null;
-    const match = text.match(CODE_PATTERN);
-    return match?.[1] ?? null;
+
+    // 1) 优先：验证码/安全密码等关键词后面紧跟的 6 位数字（Garmin 邮件正文格式）
+    const kw = text.match(KEYWORD_CODE_PATTERN);
+    if (kw?.[1] && !isImplausibleCode(kw[1])) {
+        return kw[1];
+    }
+
+    // 2) 兜底：全文所有 6 位数字候选，去掉颜色值/重复数字等明显噪声
+    const candidates = Array.from(text.matchAll(CODE_PATTERN)).map(m => m[1]);
+    for (const c of candidates) {
+        if (!isImplausibleCode(c)) {
+            return c;
+        }
+    }
+    return null;
+}
+
+/** 诊断用：列出文本中全部 6 位候选（脱敏），标注是否被判为噪声 */
+function listCodeCandidates(text: string | undefined | null): string[] {
+    if (!text) return [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const m of Array.from(text.matchAll(CODE_PATTERN))) {
+        const c = m[1];
+        if (seen.has(c)) continue;
+        seen.add(c);
+        out.push(`${c.slice(0, 2)}xxxx${isImplausibleCode(c) ? '(噪声)' : ''}`);
+    }
+    return out;
 }
 
 /**
@@ -127,6 +169,8 @@ export interface MailDiagnosticEntry {
     ageSecondsFromNow: number;
     isGarmin: boolean;
     extractedCodeMasked: string | null;
+    textCandidates?: string[];
+    htmlCandidates?: string[];
 }
 
 /**
@@ -161,11 +205,17 @@ export async function diagnoseGarminMails(
                 const fromText = (message.envelope?.from ?? []).map((f: any) => `${f.name ?? ''} <${f.address ?? ''}>`).join(', ');
                 const subject = message.envelope?.subject ?? '';
                 const isGarmin = GARMIN_SENDER_PATTERN.test(fromText) || GARMIN_SENDER_PATTERN.test(subject);
+                let textCandidates: string[] = [];
+                let htmlCandidates: string[] = [];
                 let code: string | null = extractCodeFromText(subject);
-                if (!code && message.source) {
+                if (message.source) {
                     try {
                         const parsed = await simpleParser(message.source);
-                        code = extractCodeFromText(parsed.text) ?? extractCodeFromText(parsed.html ? String(parsed.html) : null);
+                        textCandidates = listCodeCandidates(parsed.text);
+                        htmlCandidates = listCodeCandidates(parsed.html ? String(parsed.html) : null);
+                        if (!code) {
+                            code = extractCodeFromText(parsed.text) ?? extractCodeFromText(parsed.html ? String(parsed.html) : null);
+                        }
                     } catch { /* ignore */ }
                 }
                 entries.push({
@@ -175,6 +225,8 @@ export async function diagnoseGarminMails(
                     ageSecondsFromNow: internalMs ? Math.round((now - internalMs) / 1000) : -1,
                     isGarmin,
                     extractedCodeMasked: code ? `${code.slice(0, 2)}xxxx` : null,
+                    textCandidates,
+                    htmlCandidates,
                 });
             }
         } finally {
