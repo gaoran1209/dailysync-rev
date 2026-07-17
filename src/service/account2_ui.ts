@@ -107,6 +107,17 @@ export function renderAdminPage(status: Account2StatusSnapshot): string {
         </div>
         <div class="message" id="verify-message">等待验证码。</div>
       </section>
+
+      <section class="card">
+        <h2>导入国际区 Token</h2>
+        <p>国际区（garmin.com）登录受 Cloudflare 限制，服务器直接登录会被 429。请在<strong>家庭网络</strong>本地运行 <code>yarn export_global_token</code>，把打印出的 JSON 粘贴到这里导入；之后 EC2 只做刷新，不再登录。</p>
+        <label for="global-token">国际区 Token JSON</label>
+        <textarea id="global-token" rows="5" placeholder='{"sessionUser":"...","token":{"oauth1":{...},"oauth2":{...}}}' style="width:100%;padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px;font-size:13px;box-sizing:border-box;font-family:monospace;"></textarea>
+        <div class="toolbar">
+          <button type="button" id="import-global" style="background:#7c3aed;">导入国际区 Token</button>
+        </div>
+        <div class="message" id="import-message">等待粘贴。</div>
+      </section>
     </div>
   </div>
 
@@ -168,6 +179,19 @@ export function renderAdminPage(status: Account2StatusSnapshot): string {
       const data = await postJson('/api/admin/account2/login/verify', { code: codeInputEl.value });
       if (!data) return;
       verifyMessageEl.textContent = data.message || '验证码已提交';
+      await loadStatus();
+    });
+
+    document.getElementById('import-global').addEventListener('click', async () => {
+      const importMessageEl = document.getElementById('import-message');
+      const raw = document.getElementById('global-token').value.trim();
+      if (!raw) { importMessageEl.textContent = '请先粘贴 token JSON'; return; }
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch (e) { importMessageEl.textContent = 'JSON 解析失败，请检查粘贴内容是否完整'; return; }
+      importMessageEl.textContent = '正在导入国际区 token...';
+      const data = await postJson('/api/admin/account2/import-global-token', { token: parsed });
+      if (!data) return;
+      importMessageEl.textContent = data.message || '已导入';
       await loadStatus();
     });
   </script>

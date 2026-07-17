@@ -11,6 +11,8 @@ import {
     markAccountAuthError,
     markAccountAuthReady,
     markAccountAuthReauthRequired,
+    saveSessionToDB,
+    updateSessionToDB,
 } from '../utils/sqlite';
 import { getAccount2ServiceConfig } from './config';
 
@@ -113,6 +115,63 @@ export class Account2AuthService {
             await sendBarkNotification('Garmin CN 自动登录失败', verifyResult.message);
         }
         return verifyResult;
+    }
+
+    /**
+     * 导入【本地/住宅网络】导出的国际区 OAuth token，避免在 EC2 数据中心 IP 上做
+     * 会被 Cloudflare 429 拦截的密码登录。导入后 EC2 只做 token 刷新。
+     */
+    async importGlobalToken(rawPayload: any): Promise<Account2ActionResponse> {
+        await initDB();
+        try {
+            // 兼容两种粘贴格式：{sessionUser, token:{oauth1,oauth2}} 或直接 {oauth1,oauth2}
+            const payload = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
+            const token = payload?.token ?? payload;
+            const oauth1 = token?.oauth1;
+            const oauth2 = token?.oauth2;
+            if (!oauth1 || !(oauth1.oauth_token || oauth1.oauthToken)) {
+                return {
+                    status: 'error',
+                    message: '导入失败：token 格式不正确（缺少 oauth1）',
+                    account: await this.getStatus(),
+                };
+            }
+
+            const sessionUser = this.config.global.username;
+            // 尝试用 token 拉一次 profile 校验（数据中心 IP 通常可用；失败不阻断导入）
+            let validated = false;
+            let profileName = '';
+            try {
+                const GCClient = new GarminConnect({
+                    username: this.config.global.username,
+                    password: this.config.global.password,
+                });
+                GCClient.loadToken(oauth1, oauth2);
+                const p = await GCClient.getUserProfile();
+                profileName = p?.userName || p?.displayName || p?.fullName || '';
+                validated = Boolean(profileName || p);
+            } catch (e: any) {
+                console.log('[Account2Auth] 导入 token 校验 getUserProfile 失败（不阻断保存）:', e?.message);
+            }
+
+            const existing = await getSessionFromDB('GLOBAL', sessionUser).catch(() => undefined);
+            if (existing) {
+                await updateSessionToDB('GLOBAL', { oauth1, oauth2 }, sessionUser);
+            } else {
+                await saveSessionToDB('GLOBAL', { oauth1, oauth2 }, sessionUser);
+            }
+
+            const msg = validated
+                ? `国际区 Token 已导入并校验成功（账号: ${profileName || sessionUser}）`
+                : '国际区 Token 已导入并保存（未能在线校验，将在下次同步时验证）';
+            console.log('[Account2Auth]', msg);
+            const account = await this.getStatus();
+            return { status: account.status, message: msg, account };
+        } catch (err: any) {
+            const message = sanitizeMessage(`导入国际区 Token 失败: ${err?.message ?? err}`);
+            const account = await this.getStatus();
+            return { status: account.status, message, account };
+        }
     }
 
     async getStatus(): Promise<Account2StatusSnapshot> {

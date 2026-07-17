@@ -89,6 +89,11 @@ app.post('/api/admin/account2/login/auto', requireAdmin, async (_req, res) => {
     res.json(await account2AuthService.autoLogin());
 });
 
+app.post('/api/admin/account2/import-global-token', requireAdmin, async (req, res) => {
+    const payload = req.body?.token ?? req.body?.payload ?? req.body;
+    res.json(await account2AuthService.importGlobalToken(payload));
+});
+
 function runAccount2Sync() {
     return syncGarminCN2GarminGlobal({
         cn: {
