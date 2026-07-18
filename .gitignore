@@ -38,3 +38,5 @@ db/mfa_state.json
 db/*.db-shm
 db/*.db-wal
 .maestro/
+# 本地导出的国际区 token，绝不入库
+db/global_token.json
