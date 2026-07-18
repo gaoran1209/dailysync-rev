@@ -211,31 +211,36 @@ async function main() {
     loadDotEnv();
     const username = (process.env.GARMIN_GLOBAL_USERNAME_2 || process.env.GARMIN_GLOBAL_USERNAME || '').trim();
     const password = (process.env.GARMIN_GLOBAL_PASSWORD_2 || process.env.GARMIN_GLOBAL_PASSWORD || '').trim();
-    if (!username || !password) {
-        console.error('❌ 请提供国际区账号密码：GARMIN_GLOBAL_USERNAME_2 / GARMIN_GLOBAL_PASSWORD_2');
+    // 模式二：直接传入已在浏览器会话中铸好的 ServiceTicket（绕开密码登录与 Cloudflare）
+    const presetTicket = (process.env.GARMIN_GLOBAL_TICKET || '').trim();
+
+    if (!presetTicket && (!username || !password)) {
+        console.error('❌ 请提供国际区账号密码：GARMIN_GLOBAL_USERNAME_2 / GARMIN_GLOBAL_PASSWORD_2（或用 GARMIN_GLOBAL_TICKET 传入 ticket）');
         process.exit(1);
     }
 
-    console.log(`=== 导出佳明国际区 Token（账号: ${username}）===`);
-    console.log('提示：请确保当前是住宅网络/家庭宽带出口，不要用机房/VPS 网络。');
+    console.log(`=== 导出佳明国际区 Token（账号: ${username || '(用 ticket)'})===`);
 
-    // 全程裸 https：Cloudflare 对 @gooin/garmin-connect 的 axios 指纹在 sso/connectapi 上
-    // 做 301 自循环/401 软拦截，而 Node 裸 https 可正常通过。只发一次登录 POST，降低触发限流。
     let ticket: string;
-    try {
-        ticket = await loginViaBareHttps(username, password);
-        console.log('✅ 登录成功，拿到 ServiceTicket，开始 OAuth 交换...');
-    } catch (err: any) {
-        const msg = String(err?.message ?? err);
-        if (/\b429\b|too many requests|rate limit/i.test(msg)) {
-            console.error('❌ 登录被 429 拦截。这是 Cloudflare 的账号级/IP 级封锁，不是频率限制：');
-            console.error('   1) 换一个家庭宽带出口（或等目前这个出口冷却）；');
-            console.error('   2) 该账号若之前被反复登录，会进入 48-72h 账号级封锁，等封锁解除后再试；');
-            console.error('   3) 期间不要反复重跑，每次重试都会续期封锁。');
+    if (presetTicket) {
+        ticket = presetTicket;
+        console.log('使用已提供的 ServiceTicket，跳过密码登录，直接 OAuth 交换...');
+    } else {
+        // 全程裸 https：Cloudflare 对 @gooin/garmin-connect 的 axios 指纹在 sso/connectapi 上
+        // 做 301 自循环/401 软拦截，而 Node 裸 https 可正常通过。只发一次登录 POST，降低触发限流。
+        try {
+            ticket = await loginViaBareHttps(username, password);
+            console.log('✅ 登录成功，拿到 ServiceTicket，开始 OAuth 交换...');
+        } catch (err: any) {
+            const msg = String(err?.message ?? err);
+            if (/\b429\b|too many requests|rate limit/i.test(msg)) {
+                console.error('❌ 登录被 429 拦截（Cloudflare 账号级/IP 级封锁，非频率限制）。');
+                console.error('   建议改用浏览器会话铸 ticket 的方式（GARMIN_GLOBAL_TICKET）。');
+                process.exit(2);
+            }
+            console.error('❌ 登录失败:', msg);
             process.exit(2);
         }
-        console.error('❌ 登录失败:', msg);
-        process.exit(2);
     }
 
     let token: { oauth1: any; oauth2: any };
@@ -245,7 +250,7 @@ async function main() {
         console.error('❌ OAuth 交换失败:', String(err?.message ?? err));
         process.exit(2);
     }
-    const payload = { sessionUser: username, region: 'GLOBAL', token };
+    const payload = { sessionUser: username || 'GLOBAL_ACCOUNT2', region: 'GLOBAL', token };
 
     const outDir = './db';
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
