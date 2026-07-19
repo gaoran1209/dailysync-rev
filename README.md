@@ -13,15 +13,15 @@
 
 [![](https://img.shields.io/badge/-Telegram-%2326A5E4?style=flat-square&logo=telegram&logoColor=ffffff)](https://t.me/garmindailysync)
 
-## 【2025-12说明】开启了ECG功能的说明
-开通了ECG功能的佳明账号，因为登录佳明时需要提供验证码，开通ECG后，这个验证码无法关闭，github上要中途要输入一次验证码，本同步脚本无法支持，下方的Web版本做了兼容，可以使用。 
+## 【说明】开启了 ECG 功能的账号已支持定时自动同步
+开了 ECG 的佳明账号登录时强制邮箱验证码、无法关闭，纯 GitHub Actions 方案中途要人工补码，跑不通。**本仓库的「Account 2 ECG 账号方案」已经解决**：把登录放到常驻 EC2 上、用 IMAP 自动读邮箱验证码，实现无人值守的国区 → 国际区定时同步（国际区 token 用「浏览器铸票」方式导入，绕开 Cloudflare 限制）。详见下面 [Account 2 ECG 账号方案](#account-2-ecg-账号方案定时自动同步)。不熟悉部署的也可以用下方的 Web 版本。
 
 ## Web版本
 如果你不熟悉代码，强烈推荐使用这个版本，在网页上填入账号点击就能同步数据，简洁好用。
 [https://dailysync.vyzt.dev/](https://dailysync.vyzt.dev/)
 
-## Account 2 ECG 账号新方案
-针对开启 ECG 后必须邮件二次验证的国区账号，仓库现在新增了一个适合部署到 EC2 的常驻服务方案：
+## Account 2 ECG 账号方案（定时自动同步）
+针对开启 ECG 后必须邮件二次验证的国区账号，仓库新增了一个适合部署到 EC2 的常驻服务方案：
 
 - Garmin 国区登录和验证码提交流程都在 EC2 上完成，不再依赖 GitHub runner 中途人工补码。
 - **全自动验证码**：配置邮箱 IMAP 后，服务会在登录触发验证码邮件后自动从邮箱读取 6 位验证码并提交，无需人工。
@@ -41,14 +41,12 @@
 
 ### 新增服务入口
 
-- `GET /health`
-- `GET /admin`
-- `GET /api/admin/account2/status`
-- `POST /api/admin/account2/login/start`
-- `POST /api/admin/account2/login/verify`
-- `POST /api/admin/account2/login/auto`（全自动登录：发起登录 + 邮箱自动取码）
-- `POST /api/admin/account2/import-global-token`（导入国际区 token）
-- `POST /api/hooks/sync/account2`
+- `GET /health` — 健康检查 + account2 认证状态
+- `GET /admin` — 管理页（认证状态 / 国区一键重登录 / 国际区 token 导入）
+- `GET /api/admin/account2/status` — 认证状态 JSON
+- `POST /api/admin/account2/login/auto` — 国区一键重登录（发起登录 + 邮箱自动取码 + 提交，全自动）
+- `POST /api/admin/account2/import-global-token` — 导入国际区 token
+- `POST /api/hooks/sync/account2` — 定时同步 webhook（GitHub Actions 调用，Bearer token 保护）
 
 ### 需要配置的 GitHub Secrets
 
@@ -101,6 +99,21 @@
 2. **② 国际区（Global）Token 更新**：token 失效时，按页面步骤用「浏览器铸票 + 导入」重做一次（详见上一节）。
 
 > 旧的「开始 Garmin 国区登录」「提交邮件验证码」两个手动分步模块已移除——它们的功能被「立即重新登录」一键自动化覆盖。
+
+### EC2 运维说明（日常无需登录服务器）
+
+部署完全自动化：`git push` 到 `main` → `Deploy Account 2 Service to EC2` workflow 自动 SSH 部署、重建容器、配置 nginx/SSL。数据（sqlite session、浏览器 profile）存在 docker 命名卷 `app_data`，**重新部署不会丢登录态**。日常不需要登录 EC2。
+
+只有以下情况才需要关注：
+
+| 场景 | 怎么处理 |
+|---|---|
+| 修改了需要 EC2 生效的 Secret（如换了 `MAIL_IMAP_PASSWORD`、账号密码） | 到 Actions 手动重跑一次 `Deploy Account 2 Service to EC2`，把新值注入 EC2 `.env` |
+| 国际区 token 失效（约一年一次） | 见上面「② 国际区 Token 更新」，无需登录 EC2，管理页导入即可 |
+| 想看服务日志排查 | SSH 后 `sudo docker logs --tail 200 daily-sync-account2-app` |
+| 磁盘增长（可选清理） | fit 文件缓存在卷 `app_data:/app/data/garmin_fit_files`，长期可清理；同步逻辑不依赖它 |
+
+无需手动做的：容器随 `restart: unless-stopped` 开机自启；SSL 证书由 certbot 自动续期；token 每次同步自动刷新。
 
 ## 其他仓库备份
 gitlab: 
