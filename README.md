@@ -46,6 +46,8 @@
 - `GET /api/admin/account2/status`
 - `POST /api/admin/account2/login/start`
 - `POST /api/admin/account2/login/verify`
+- `POST /api/admin/account2/login/auto`（全自动登录：发起登录 + 邮箱自动取码）
+- `POST /api/admin/account2/import-global-token`（导入国际区 token）
 - `POST /api/hooks/sync/account2`
 
 ### 需要配置的 GitHub Secrets
@@ -68,17 +70,24 @@
 - `MAIL_IMAP_HOST` / `MAIL_IMAP_PORT` / `MAIL_IMAP_USER`（均可选，默认 163）
 
 ### 国际区（garmin.com）429 说明与 Token 导入
-2026-03 起 Garmin 在国际区 SSO 前启用了 Cloudflare 机器人检测，**在服务器/数据中心 IP 上做国际区密码登录会被 429 拦截**（中国区 garmin.cn 不受影响）。反复重试还会升级为账号级封锁（48-72h）。因此账号2 的国际区登录改为「本地导出 token → 注入 EC2」，之后 EC2 只刷新不登录：
+2026-03 起 Garmin 在国际区 SSO（`sso.garmin.com`）前启用了 Cloudflare 机器人检测：**在服务器/数据中心 IP 上、用 Node/axios 之类非浏览器客户端做国际区密码登录会被 429 拦截**（不是频率限制；中国区 `garmin.cn` 不受影响，所以账号2 的 CN 端在 EC2 上正常）。反复重试还会升级为账号级封锁（48-72h）。已保存的 token 做刷新（走 `connectapi.garmin.com` 的 OAuth 交换）不受影响——这也是账号1 一直正常的原因。
 
-1. 在**家庭网络**、项目根目录本地运行（凭据从 `.env` 或命令行读取，不上传服务器）：
+> 说明：国内看到的「国际区」`connectus.garmin.cn` 只是国际账号的国内前端，其 SSO 仍是 `sso.garmin.com`、API 仍是 `connectapi.garmin.com`，token 通用。
+
+因此账号2 的国际区改为「一次性导出 token → 注入 EC2，之后只刷新不登录」。**推荐用浏览器会话铸票法**（无需密码、不碰 Cloudflare 拦截）：
+
+1. 在电脑的 **Chrome 浏览器**里登录国际区账号（打开 `https://connectus.garmin.cn` 或 `https://connect.garmin.com` 登录）。
+2. 同一浏览器地址栏访问一次：`https://sso.garmin.com/sso/embed?clientId=GarminConnect&locale=en` —— 有会话时它会自动跳到 `.../sso/embed?ticket=ST-xxxx-cas`，复制地址栏里 `ticket=` 后面那串 `ST-...-cas`。
+3. 项目根目录本地运行（把票粘进去）：
    ```shell
-   GARMIN_GLOBAL_USERNAME_2=你的国际区账号 GARMIN_GLOBAL_PASSWORD_2=密码 yarn export_global_token
+   GARMIN_GLOBAL_TICKET='ST-xxxx-cas' yarn export_global_token
    ```
-   成功后终端会打印一段 token JSON。
-2. 打开 `${APP_BASE_URL}/admin` 登录后，把 JSON 粘贴到「导入国际区 Token」并提交。
-3. 之后账号2 的定时同步会用这个 token（OAuth1 约 1 年有效，OAuth2 自动刷新），不再触发国际区登录。
-> 若导出时也报 429，说明该国际区账号仍在账号级封锁窗口内，等 48-72h 后再导出。
-> 库已升级到 `@gooin/garmin-connect@1.8.7`（上游针对该封锁的登录修复），但数据中心 IP 上仍不保证 fresh login 成功，token 导入是更可靠的方式。
+   成功后 token 写入 `db/global_token.json`（已 gitignore）。
+4. 打开 `${APP_BASE_URL}/admin` 登录后，把 `db/global_token.json` 内容粘到「导入国际区 Token」并提交（macOS 可 `cat db/global_token.json | pbcopy` 直接复制到剪贴板）。
+5. 导入后账号2 定时同步即可用这份 token（OAuth1 约 1 年有效、OAuth2 每次同步自动刷新），一年内基本无需再管。
+
+> 备用：`GARMIN_GLOBAL_USERNAME_2=账号 GARMIN_GLOBAL_PASSWORD_2=密码 yarn export_global_token` 会走裸 https 密码登录（脚本已绕过库 axios 被 Cloudflare 拦的问题），但**数据中心/VPN 出口 IP 仍可能被 429**，不如浏览器铸票法稳。
+> 库已升级到 `@gooin/garmin-connect@1.8.7`（上游针对该封锁的登录修复）。
 
 ### Account 2 使用方式
 
