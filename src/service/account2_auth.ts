@@ -223,7 +223,8 @@ export class Account2AuthService {
         };
     }
 
-    async startLogin(): Promise<Account2ActionResponse> {
+    // 内部使用：由 autoLogin() 调用发起国区登录（Playwright 提交账号密码）
+    private async startLogin(): Promise<Account2ActionResponse> {
         try {
             const page = await this.openFreshPage();
             // 用与 @gooin/garmin-connect 库一致的参数，确保 ticket 的 service 匹配 OAuth exchange 的 login-url
@@ -284,7 +285,8 @@ export class Account2AuthService {
         }
     }
 
-    async verifyCode(rawCode: string): Promise<Account2ActionResponse> {
+    // 内部使用：由 autoLogin() 在拿到邮箱验证码后调用提交
+    private async verifyCode(rawCode: string): Promise<Account2ActionResponse> {
         const code = rawCode.trim().replace(/[^\dA-Za-z]/g, '');
         if (!code) {
             return {

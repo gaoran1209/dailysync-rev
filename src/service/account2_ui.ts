@@ -32,7 +32,7 @@ export function renderAdminLoginPage(errorMessage?: string): string {
 <body>
   <div class="card">
     <h1>Account 2 管理页</h1>
-    <p>登录后可以在同一浏览器上下文里发起 Garmin 国区登录、提交邮箱验证码，并查看 account 2 的认证状态。</p>
+    <p>登录后可查看 account 2 认证状态，并在登录失效时手动维护（国区重登录 / 国际区 token 更新）。</p>
     ${errorBlock}
     <form method="post" action="/admin/login">
       <label for="username">管理员账号</label>
@@ -73,7 +73,7 @@ export function renderAdminPage(status: Account2StatusSnapshot): string {
 <body>
   <div class="wrap">
     <h1>DailySync Account 2 管理页</h1>
-    <p>用这页发起 Garmin 国区登录、提交邮件验证码，并查看 account 2 当前的认证状态。</p>
+    <p>查看 account 2 认证状态；登录失效时用下面两个维护操作恢复。<strong>正常情况全自动，无需操作。</strong></p>
 
     <div class="grid">
       <section class="card">
@@ -85,34 +85,33 @@ export function renderAdminPage(status: Account2StatusSnapshot): string {
             <button type="submit" style="background:#475569;">退出登录</button>
           </form>
         </div>
+        <p style="margin-top:12px;font-size:13px;color:#475569;line-height:1.7;">
+          <code>ready</code> 正常；<code>reauth_required</code> 国区登录态失效（用「①国区重登录」）；
+          <code>error</code> 上次出错，看 <code>lastError</code>；<code>awaiting_code</code> 正在等邮箱验证码。
+        </p>
       </section>
 
       <section class="card">
-        <h2>发起 Garmin 国区登录</h2>
-        <p>点击后，服务会在 EC2 上的持久浏览器上下文里提交国区账号密码。如果需要邮件验证码，状态会切到 <code>awaiting_code</code>。</p>
+        <h2>① 国区（CN）重新登录</h2>
+        <p>国区 session 约 1 年有效。失效时定时同步会<strong>自动</strong>「邮箱取码」重登录，一般无需手动。
+        想立即重登录或排查邮箱取码时点这里（约 1~5 分钟，自动读 163 邮箱验证码）：</p>
         <div class="toolbar">
-          <button type="button" id="start-login">开始 Garmin 国区登录</button>
-          <button type="button" id="auto-login" style="background:#047857;">全自动登录（邮箱自动取码）</button>
+          <button type="button" id="auto-login" style="background:#047857;">立即重新登录（邮箱自动取码）</button>
         </div>
         <div class="message" id="start-message">等待操作。</div>
       </section>
 
       <section class="card">
-        <h2>提交邮件验证码</h2>
-        <p>在收到 Garmin 邮件验证码后，填入这里。提交会复用刚才那次登录留下的浏览器上下文。</p>
-        <label for="mfa-code">邮件验证码</label>
-        <input id="mfa-code" placeholder="例如 123456" />
-        <div class="toolbar">
-          <button type="button" id="verify-code">提交验证码</button>
-        </div>
-        <div class="message" id="verify-message">等待验证码。</div>
-      </section>
-
-      <section class="card">
-        <h2>导入国际区 Token</h2>
-        <p>国际区（garmin.com）登录受 Cloudflare 限制，服务器直接登录会被 429。请在<strong>家庭网络</strong>本地运行 <code>yarn export_global_token</code>，把打印出的 JSON 粘贴到这里导入；之后 EC2 只做刷新，不再登录。</p>
+        <h2>② 国际区（Global）Token 更新</h2>
+        <p>国际区登录受 Cloudflare 限制，改为「浏览器铸票 + 导入」。token 约 1 年有效、每次同步自动刷新，失效时按下面重做一次：</p>
+        <ol style="font-size:13px;color:#334155;line-height:1.8;padding-left:20px;margin:0 0 10px;">
+          <li>电脑 Chrome 登录国际区（<code>connectus.garmin.cn</code>）</li>
+          <li>同浏览器访问 <code>sso.garmin.com/sso/embed?clientId=GarminConnect&locale=en</code>，复制地址栏 <code>ticket=</code> 后的 <code>ST-…-cas</code></li>
+          <li>本地跑 <code>GARMIN_GLOBAL_TICKET='ST-…-cas' yarn export_global_token</code></li>
+          <li>把 <code>db/global_token.json</code> 内容粘到下框，点导入</li>
+        </ol>
         <label for="global-token">国际区 Token JSON</label>
-        <textarea id="global-token" rows="5" placeholder='{"sessionUser":"...","token":{"oauth1":{...},"oauth2":{...}}}' style="width:100%;padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px;font-size:13px;box-sizing:border-box;font-family:monospace;"></textarea>
+        <textarea id="global-token" rows="4" placeholder='{"sessionUser":"...","token":{"oauth1":{...},"oauth2":{...}}}' style="width:100%;padding:12px 14px;border:1px solid #cbd5e1;border-radius:10px;font-size:13px;box-sizing:border-box;font-family:monospace;"></textarea>
         <div class="toolbar">
           <button type="button" id="import-global" style="background:#7c3aed;">导入国际区 Token</button>
         </div>
@@ -124,8 +123,6 @@ export function renderAdminPage(status: Account2StatusSnapshot): string {
   <script>
     const statusEl = document.getElementById('status');
     const startMessageEl = document.getElementById('start-message');
-    const verifyMessageEl = document.getElementById('verify-message');
-    const codeInputEl = document.getElementById('mfa-code');
 
     async function loadStatus() {
       const response = await fetch('/api/admin/account2/status', { credentials: 'same-origin' });
@@ -158,27 +155,11 @@ export function renderAdminPage(status: Account2StatusSnapshot): string {
       });
     });
 
-    document.getElementById('start-login').addEventListener('click', async () => {
-      startMessageEl.textContent = '正在发起 Garmin 登录...';
-      const data = await postJson('/api/admin/account2/login/start');
-      if (!data) return;
-      startMessageEl.textContent = data.message || '已发起登录';
-      await loadStatus();
-    });
-
     document.getElementById('auto-login').addEventListener('click', async () => {
-      startMessageEl.textContent = '正在全自动登录（发起登录 + 等待邮箱验证码，最长约 5 分钟）...';
+      startMessageEl.textContent = '正在重新登录（发起登录 + 等待邮箱验证码，最长约 5 分钟）...';
       const data = await postJson('/api/admin/account2/login/auto');
       if (!data) return;
-      startMessageEl.textContent = data.message || '自动登录已完成';
-      await loadStatus();
-    });
-
-    document.getElementById('verify-code').addEventListener('click', async () => {
-      verifyMessageEl.textContent = '正在提交验证码...';
-      const data = await postJson('/api/admin/account2/login/verify', { code: codeInputEl.value });
-      if (!data) return;
-      verifyMessageEl.textContent = data.message || '验证码已提交';
+      startMessageEl.textContent = data.message || '登录已完成';
       await loadStatus();
     });
 

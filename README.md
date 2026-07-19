@@ -89,13 +89,18 @@
 > 备用：`GARMIN_GLOBAL_USERNAME_2=账号 GARMIN_GLOBAL_PASSWORD_2=密码 yarn export_global_token` 会走裸 https 密码登录（脚本已绕过库 axios 被 Cloudflare 拦的问题），但**数据中心/VPN 出口 IP 仍可能被 429**，不如浏览器铸票法稳。
 > 库已升级到 `@gooin/garmin-connect@1.8.7`（上游针对该封锁的登录修复）。
 
-### Account 2 使用方式
+### Account 2 使用方式（日常全自动，无需操作）
 
-1. 把代码 push 到 `main`，等待 `Deploy Account 2 Service to EC2` workflow 完成部署。
-2. 打开 `${APP_BASE_URL}/admin`，用管理员账号密码登录。
-3. 已配置 `MAIL_IMAP_PASSWORD` 时：点击「全自动登录（邮箱自动取码）」，服务会自动发起登录、等邮件、读码、提交，一步到位。
-4. 未配置邮箱或想手动时：点击「开始 Garmin 国区登录」，收到邮件验证码后在管理页填入并提交。
-5. 后续 GitHub 的 `Sync Garmin CN to Garmin Global (Account 2)` workflow 会定时调用 EC2 webhook 触发同步；即使 token 到期，webhook 也会先自动重登录再重试，通常无需人工介入。
+部署完成后，`Sync Garmin CN to Garmin Global (Account 2)` workflow 每 6 小时调用 EC2 webhook 触发同步：
+- **国区（CN）**：session 约 1 年有效；失效时 webhook 会自动「邮箱取码」重登录再重试，无需人工。
+- **国际区（Global）**：用导入的 token 同步、每次自动刷新；约 1 年内无需管。
+
+`${APP_BASE_URL}/admin` 管理页只在**登录失效需要维护**时才用，只有两个操作：
+
+1. **① 国区（CN）重新登录**：点「立即重新登录（邮箱自动取码）」即可（通常也不用点，cron 会自动做）。
+2. **② 国际区（Global）Token 更新**：token 失效时，按页面步骤用「浏览器铸票 + 导入」重做一次（详见上一节）。
+
+> 旧的「开始 Garmin 国区登录」「提交邮件验证码」两个手动分步模块已移除——它们的功能被「立即重新登录」一键自动化覆盖。
 
 ## 其他仓库备份
 gitlab: 

@@ -76,15 +76,8 @@ app.get('/api/admin/account2/status', requireAdmin, async (_req, res) => {
     res.json(await account2AuthService.getStatus());
 });
 
-app.post('/api/admin/account2/login/start', requireAdmin, async (_req, res) => {
-    res.json(await account2AuthService.startLogin());
-});
-
-app.post('/api/admin/account2/login/verify', requireAdmin, async (req, res) => {
-    const code = String(req.body.code ?? req.body.mfaCode ?? '');
-    res.json(await account2AuthService.verifyCode(code));
-});
-
+// 国区登录统一走「全自动登录」（内部自动 startLogin + 邮箱取码 + verifyCode）。
+// 旧的手动分步路由 /login/start、/login/verify 已移除，改由 autoLogin 内部调用。
 app.post('/api/admin/account2/login/auto', requireAdmin, async (_req, res) => {
     res.json(await account2AuthService.autoLogin());
 });
