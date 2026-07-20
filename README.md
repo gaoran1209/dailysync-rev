@@ -1,385 +1,143 @@
-# 佳明运动数据同步与采集工具
+# Garmin 双账号 · 国区 → 国际区自动同步
 
+这是我自用的佳明数据同步项目：把**两个使用者的佳明国区账号**的运动数据，定时自动同步到各自的国际区账号。Fork 自 [gooin/dailysync-rev](https://github.com/gooin/dailysync-rev)，在其基础上做了大量定制（ECG 账号支持、邮箱自动验证码、自愈重登录、国际区 token 导入等）。
 
+## 总览
 
-![workflow](./assets/workflow.png)
+| | 账号1 | 账号2 |
+|---|---|---|
+| 特点 | 无 MFA，登录简单 | **开了 ECG**，登录强制邮箱验证码 |
+| 同步方式 | GitHub Actions 直接跑 | GitHub Actions 定时打 EC2 webhook，EC2 常驻服务执行 |
+| 登录态 | session 存 `db/garmin.db`，随 runner 自动提交回仓库 | 国区：EC2 上 Playwright 登录 + **163 邮箱 IMAP 自动读验证码**；国际区：本地「浏览器铸票」导出 token 导入 EC2 |
+| 频率 | 每 6 小时（UTC 0/6/12/18 点，北京 8/14/20/2 点） | 同左 |
+| 失效自愈 | 无 MFA，自动重登录 | 国区 token 失效时 webhook 自动「登录+邮箱取码」重试；国际区 token 约 1 年一换（手动导入） |
 
-<a style="display:inline-block;background-color:#FC5200;color:#fff;padding:5px 10px 5px 30px;font-size:11px;font-family:Helvetica, Arial, sans-serif;white-space:nowrap;text-decoration:none;background-repeat:no-repeat;background-position:10px center;border-radius:3px;background-image:url('https://badges.strava.com/logo-strava-echelon.png')" href='https://strava.com/athletes/84396978' target="_clean">
-  关注作者Strava
-  <img src='https://badges.strava.com/logo-strava.png' alt='Strava' style='margin-left:2px;vertical-align:text-bottom' height=13 width=51 />
-</a>
+每天早上 8 点，openclaw 的「每日简报」会调用 [scripts/sync-report.js](scripts/sync-report.js) 统计过去 24 小时两个账号各同步了多少条，推送到飞书。
 
+## 架构
 
+```
+账号1：GitHub Actions (cron 6h)
+        └─ yarn sync_cn ──> 佳明国区 API ──下载 FIT──> 上传国际区
+           └─ session 加密存 db/garmin.db，git-auto-commit 回仓库
 
-[![](https://img.shields.io/badge/-Telegram-%2326A5E4?style=flat-square&logo=telegram&logoColor=ffffff)](https://t.me/garmindailysync)
+账号2：GitHub Actions (cron 6h)
+        └─ POST https://sync.gaoran.xyz/api/hooks/sync/account2 (Bearer token)
+             └─ EC2 Docker 常驻服务 (Express + Playwright)
+                 ├─ 国区登录态失效 → Playwright 登录 → IMAP 读 163 邮箱验证码 → 自动提交
+                 ├─ 国际区用导入的 OAuth token（每次同步自动刷新 OAuth2）
+                 └─ 下载 FIT → 上传国际区 → 结果返回 webhook
 
-## 【说明】开启了 ECG 功能的账号已支持定时自动同步
-开了 ECG 的佳明账号登录时强制邮箱验证码、无法关闭，纯 GitHub Actions 方案中途要人工补码，跑不通。**本仓库的「Account 2 ECG 账号方案」已经解决**：把登录放到常驻 EC2 上、用 IMAP 自动读邮箱验证码，实现无人值守的国区 → 国际区定时同步（国际区 token 用「浏览器铸票」方式导入，绕开 Cloudflare 限制）。详见下面 [Account 2 ECG 账号方案](#account-2-ecg-账号方案定时自动同步)。不熟悉部署的也可以用下方的 Web 版本。
+部署：push main → GitHub Actions SSH 到 EC2 → docker compose 重建 → nginx/SSL(certbot)
+数据持久化：docker 命名卷 app_data（sqlite session、Playwright profile），重部署不丢
+```
 
-## Web版本
-如果你不熟悉代码，强烈推荐使用这个版本，在网页上填入账号点击就能同步数据，简洁好用。
-[https://dailysync.vyzt.dev/](https://dailysync.vyzt.dev/)
+同步判定用活动「时间指纹」（startTimeGMT+时长+距离）做集合差集比对，每次检查两边最近 10 条，乱序补传/同名活动/跨时区都不会漏；上传失败会记录并在下次自动重试。
 
-## Account 2 ECG 账号方案（定时自动同步）
-针对开启 ECG 后必须邮件二次验证的国区账号，仓库新增了一个适合部署到 EC2 的常驻服务方案：
+## 日常维护：基本不需要
 
-- Garmin 国区登录和验证码提交流程都在 EC2 上完成，不再依赖 GitHub runner 中途人工补码。
-- **全自动验证码**：配置邮箱 IMAP 后，服务会在登录触发验证码邮件后自动从邮箱读取 6 位验证码并提交，无需人工。
-- **自愈式重登录**：定时同步时若发现 Garmin 登录态失效（且区分了瞬时网络错误，不会误删长效 token），会自动走一次「登录 + 邮箱取码」重新拿 token 再重试同步。
-- 本地开发后只需要把代码推到 GitHub，GitHub Actions 会把最新代码同步部署到 EC2。
-- account 2 的定时同步由 GitHub Actions 调用 EC2 上的受保护 webhook 触发。
-- Garmin 国区/国际区账号密码、管理员账号密码、webhook token、邮箱 IMAP 授权码都通过 GitHub Secrets 注入 EC2 的 `.env`。
+正常情况全自动。只有两种登录态失效需要人工介入（管理页 `https://sync.gaoran.xyz/admin`，用管理员账号登录）：
 
-### 邮箱自动取码配置（163 邮箱示例）
-1. 登录 163 邮箱网页版 → 设置 → POP3/SMTP/IMAP → 开启 **IMAP/SMTP 服务**，并按提示生成一串 **客户端授权码**（不是邮箱登录密码）。
-2. 在 GitHub 仓库 Secrets 里新增：
-   - `MAIL_IMAP_PASSWORD`：上一步的授权码（**必填**，不填则回退到管理页人工提交验证码）
-   - `MAIL_IMAP_HOST`：可选，默认 `imap.163.com`
-   - `MAIL_IMAP_PORT`：可选，默认 `993`
-   - `MAIL_IMAP_USER`：可选，默认取 `GARMIN_USERNAME_2`（即收验证码的那个邮箱）
-3. 其它邮箱同理，把 host 换成对应 IMAP 服务器（QQ 邮箱 `imap.qq.com`、Gmail `imap.gmail.com` 等），密码同样用授权码/应用专用密码。
+### ① 国区登录失效（`/health` 或管理页显示 `reauth_required`）
 
-### 新增服务入口
+通常**不用管**——下一次定时同步会自动重登录（邮箱自动取码）。想立即恢复就在管理页点「立即重新登录（邮箱自动取码）」，约 1~5 分钟。
 
-- `GET /health` — 健康检查 + account2 认证状态
-- `GET /admin` — 管理页（认证状态 / 国区一键重登录 / 国际区 token 导入）
-- `GET /api/admin/account2/status` — 认证状态 JSON
-- `POST /api/admin/account2/login/auto` — 国区一键重登录（发起登录 + 邮箱自动取码 + 提交，全自动）
-- `POST /api/admin/account2/import-global-token` — 导入国际区 token
-- `POST /api/hooks/sync/account2` — 定时同步 webhook（GitHub Actions 调用，Bearer token 保护）
+### ② 国际区 token 失效（约一年一次）
 
-### 需要配置的 GitHub Secrets
+国际区 `sso.garmin.com` 有 Cloudflare 机器人检测，服务器/脚本直接密码登录会被 429 拦截（这不是频率限制，等多久都没用）。用「浏览器铸票」绕开：
 
-- `EC2_HOST`
-- `EC2_USER`
-- `EC2_SSH_PRIVATE_KEY`
-- `EC2_DEPLOY_PATH`
-- `APP_BASE_URL`
-- `GARMIN_USERNAME_2`
-- `GARMIN_PASSWORD_2`
-- `GARMIN_GLOBAL_USERNAME_2`
-- `GARMIN_GLOBAL_PASSWORD_2`
-- `ADMIN_USERNAME`
-- `ADMIN_PASSWORD`
-- `ACCOUNT2_SYNC_WEBHOOK_TOKEN`
-- `AESKEY`
-- `BARK_KEY`
-- `MAIL_IMAP_PASSWORD`（邮箱 IMAP 授权码，用于自动读取验证码；不配则回退人工补码）
-- `MAIL_IMAP_HOST` / `MAIL_IMAP_PORT` / `MAIL_IMAP_USER`（均可选，默认 163）
+1. 电脑 Chrome 登录国际区（`connectus.garmin.cn`）
+2. 同一浏览器访问 `https://sso.garmin.com/sso/embed?clientId=GarminConnect&locale=en`，会自动跳转，复制地址栏 `ticket=` 后面的 `ST-…-cas`
+3. 本项目根目录跑：`GARMIN_GLOBAL_TICKET='ST-…-cas' corepack yarn export_global_token`
+4. 把生成的 `db/global_token.json` 内容粘到管理页「导入国际区 Token」提交
 
-### 国际区（garmin.com）429 说明与 Token 导入
-2026-03 起 Garmin 在国际区 SSO（`sso.garmin.com`）前启用了 Cloudflare 机器人检测：**在服务器/数据中心 IP 上、用 Node/axios 之类非浏览器客户端做国际区密码登录会被 429 拦截**（不是频率限制；中国区 `garmin.cn` 不受影响，所以账号2 的 CN 端在 EC2 上正常）。反复重试还会升级为账号级封锁（48-72h）。已保存的 token 做刷新（走 `connectapi.garmin.com` 的 OAuth 交换）不受影响——这也是账号1 一直正常的原因。
+> 原理：浏览器已登录的会话可以免密铸出 ServiceTicket，真实浏览器指纹不会被 Cloudflare 拦；脚本再用裸 https 把 ticket 换成长效 OAuth1（约 1 年）+ OAuth2（自动刷新）。
 
-> 说明：国内看到的「国际区」`connectus.garmin.cn` 只是国际账号的国内前端，其 SSO 仍是 `sso.garmin.com`、API 仍是 `connectapi.garmin.com`，token 通用。
+### 其它场景
 
-因此账号2 的国际区改为「一次性导出 token → 注入 EC2，之后只刷新不登录」。**推荐用浏览器会话铸票法**（无需密码、不碰 Cloudflare 拦截）：
-
-1. 在电脑的 **Chrome 浏览器**里登录国际区账号（打开 `https://connectus.garmin.cn` 或 `https://connect.garmin.com` 登录）。
-2. 同一浏览器地址栏访问一次：`https://sso.garmin.com/sso/embed?clientId=GarminConnect&locale=en` —— 有会话时它会自动跳到 `.../sso/embed?ticket=ST-xxxx-cas`，复制地址栏里 `ticket=` 后面那串 `ST-...-cas`。
-3. 项目根目录本地运行（把票粘进去）：
-   ```shell
-   GARMIN_GLOBAL_TICKET='ST-xxxx-cas' yarn export_global_token
-   ```
-   成功后 token 写入 `db/global_token.json`（已 gitignore）。
-4. 打开 `${APP_BASE_URL}/admin` 登录后，把 `db/global_token.json` 内容粘到「导入国际区 Token」并提交（macOS 可 `cat db/global_token.json | pbcopy` 直接复制到剪贴板）。
-5. 导入后账号2 定时同步即可用这份 token（OAuth1 约 1 年有效、OAuth2 每次同步自动刷新），一年内基本无需再管。
-
-> 备用：`GARMIN_GLOBAL_USERNAME_2=账号 GARMIN_GLOBAL_PASSWORD_2=密码 yarn export_global_token` 会走裸 https 密码登录（脚本已绕过库 axios 被 Cloudflare 拦的问题），但**数据中心/VPN 出口 IP 仍可能被 429**，不如浏览器铸票法稳。
-> 库已升级到 `@gooin/garmin-connect@1.8.7`（上游针对该封锁的登录修复）。
-
-### Account 2 使用方式（日常全自动，无需操作）
-
-部署完成后，`Sync Garmin CN to Garmin Global (Account 2)` workflow 每 6 小时调用 EC2 webhook 触发同步：
-- **国区（CN）**：session 约 1 年有效；失效时 webhook 会自动「邮箱取码」重登录再重试，无需人工。
-- **国际区（Global）**：用导入的 token 同步、每次自动刷新；约 1 年内无需管。
-
-`${APP_BASE_URL}/admin` 管理页只在**登录失效需要维护**时才用，只有两个操作：
-
-1. **① 国区（CN）重新登录**：点「立即重新登录（邮箱自动取码）」即可（通常也不用点，cron 会自动做）。
-2. **② 国际区（Global）Token 更新**：token 失效时，按页面步骤用「浏览器铸票 + 导入」重做一次（详见上一节）。
-
-> 旧的「开始 Garmin 国区登录」「提交邮件验证码」两个手动分步模块已移除——它们的功能被「立即重新登录」一键自动化覆盖。
-
-### EC2 运维说明（日常无需登录服务器）
-
-部署完全自动化：`git push` 到 `main` → `Deploy Account 2 Service to EC2` workflow 自动 SSH 部署、重建容器、配置 nginx/SSL。数据（sqlite session、浏览器 profile）存在 docker 命名卷 `app_data`，**重新部署不会丢登录态**。日常不需要登录 EC2。
-
-只有以下情况才需要关注：
-
-| 场景 | 怎么处理 |
+| 场景 | 操作 |
 |---|---|
-| 修改了需要 EC2 生效的 Secret（如换了 `MAIL_IMAP_PASSWORD`、账号密码） | 到 Actions 手动重跑一次 `Deploy Account 2 Service to EC2`，把新值注入 EC2 `.env` |
-| 国际区 token 失效（约一年一次） | 见上面「② 国际区 Token 更新」，无需登录 EC2，管理页导入即可 |
-| 想看服务日志排查 | SSH 后 `sudo docker logs --tail 200 daily-sync-account2-app` |
-| 磁盘增长（可选清理） | fit 文件缓存在卷 `app_data:/app/data/garmin_fit_files`，长期可清理；同步逻辑不依赖它 |
+| 改了 GitHub Secret（邮箱授权码、账号密码等） | Actions 手动重跑 `Deploy Account 2 Service to EC2` 注入 EC2 |
+| 看 EC2 服务日志 | SSH 后 `sudo docker logs --tail 200 daily-sync-account2-app` |
+| 查服务状态 | `curl https://sync.gaoran.xyz/health` |
+| 手动触发一次同步 | Actions 里 dispatch `Sync Garmin CN to Garmin Global (Account 2)`（或账号1 的同名 workflow） |
 
-无需手动做的：容器随 `restart: unless-stopped` 开机自启；SSL 证书由 certbot 自动续期；token 每次同步自动刷新。
+容器开机自启（`restart: unless-stopped`）、SSL 自动续期、token 自动刷新，都不用管。
 
-## 其他仓库备份
-gitlab: 
-[https://gitlab.com/gooin/dailysync](https://gitlab.com/gooin/dailysync)
+## GitHub Actions
 
-github:（actions方式正常可用）
-[https://github.com/gooin/dailysync-rev](https://github.com/gooin/dailysync-rev)
+| Workflow | 作用 | 状态 |
+|---|---|---|
+| `Sync Garmin CN to Garmin Global` | 账号1 定时同步 | ✅ cron 每 6h |
+| `Sync Garmin CN to Garmin Global (Account 2)` | 账号2 定时触发 EC2 webhook | ✅ cron 每 6h |
+| `Deploy Account 2 Service to EC2` | push main 自动部署 EC2 | ✅ push 触发 |
+| `Migrate …` ×2 | 一次性历史迁移（上游功能） | 手动 dispatch，平时禁用 |
 
-## Docker版本
-如果你懂一点代码，会使用 docker 可以使用此方案。
+## GitHub Secrets
 
-### 拉取代码
-目前没有提供打包好的镜像，需要拉取下来自行打包使用
-```shell
-git clone https://gitlab.com/gooin/dailysync.git
-```
-### 修改配置文件
-打开`.env`文件，按注释填入信息
+| Secret | 用途 |
+|---|---|
+| `GARMIN_USERNAME` / `GARMIN_PASSWORD` | 账号1 国区 |
+| `GARMIN_GLOBAL_USERNAME` / `GARMIN_GLOBAL_PASSWORD` | 账号1 国际区 |
+| `GARMIN_USERNAME_2` / `GARMIN_PASSWORD_2` | 账号2 国区 |
+| `GARMIN_GLOBAL_USERNAME_2` / `GARMIN_GLOBAL_PASSWORD_2` | 账号2 国际区 |
+| `MAIL_IMAP_PASSWORD` | 163 邮箱 IMAP **授权码**（自动读验证码用；`MAIL_IMAP_HOST/PORT/USER` 可选，默认 163） |
+| `EC2_HOST` / `EC2_USER` / `EC2_SSH_PRIVATE_KEY` / `EC2_DEPLOY_PATH` | 部署目标 |
+| `APP_BASE_URL` | EC2 服务地址（`https://sync.gaoran.xyz`） |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 管理页登录 |
+| `ACCOUNT2_SYNC_WEBHOOK_TOKEN` | webhook Bearer token |
+| `AESKEY` | session 加密密钥 |
+| `BARK_KEY` | Bark 推送通知（登录成功/失败、部分同步失败等） |
 
-### 修改docker-compsoe.yml 文件
+## EC2 服务入口
 
-可以通过修改文件中的`command`参数决定每次执行的功能，默认是国区同步到国际区
+- `GET /health` — 健康检查 + account2 认证状态（`ready` / `reauth_required` / `error` / `awaiting_code`）
+- `GET /admin` — 管理页（状态查看 + 上面 ①② 两个维护操作）
+- `POST /api/admin/account2/login/auto` — 国区一键重登录（登录 + 邮箱取码全自动）
+- `POST /api/admin/account2/import-global-token` — 导入国际区 token
+- `POST /api/hooks/sync/account2` — 定时同步 webhook（Bearer token 保护）
 
-```shell
-yarn sync_cn
-```
-同步国际区到中国区
-```shell
-yarn sync_global
-```
-迁移历史数据：中国区到国际区
-```shell
-yarn migrate_garmin_cn_to_global
-```
-迁移历史数据：国际区到中国区
-```shell
-yarn migrate_garmin_global_to_cn
-```
-
-### 打包运行一次项目
-```shell
-docker-compose up
-```
-
-### 配置系统定时任务
-参照下文中的 `定时任务(Linux Only)`，把命令替换成使用
-```shell
-docker start daily-sync
-```
-## Github运行方案
-因为项目之前在Github上占用过多资源被封禁，现在已经调整了执行的频率，熟悉代码的话，将代码下载下来，上传到github，通过 github Actions执行
-具体参考下方文档或参考视频教程: https://www.bilibili.com/video/BV1v94y1Q7oR/?spm_id_from=333.999.0.0
-
-## 使用前账号准备与配置
-
-【重要重要重要！！！】请先参照 [账号准备](https://dailysync.vyzt.dev/docs/%E8%B4%A6%E5%8F%B7%E5%87%86%E5%A4%87) 进行账号配置，再来使用此工具
-
-## 本地运行方案
-首先确保运行此脚本的机器能够访问国际互联网, 如国外VPS、家庭全局科学的环境等， 否则无法正常登录佳明国际区
-
-## 检查网络情况确保正常访问佳明服务
-
-### 测试国际互联网网络连通性
-```shell
-wget google.com
-```
-执行后确保相应的数据类似如下再进行下面步骤，否则请检查网络环境（命令行也需要能访问国际互联网, 如果google在浏览器能正常访问，但是命令行无法ping通，google搜索关键词**命令行翻墙**，参考配置一下重试。） 如果用的时Clash，在左侧 General 下，将 TUN Mode 模式开启也可。
-```shell
-root@home:~# wget google.com
-
-StatusCode        : 200
-StatusDescription : OK
-Content           : <!doctype html><html itemscope="" itemtype="http://schema.org/WebPage" lang="zh-HK"><head><meta con
-                    tent="text/html; charset=UTF-8" http-equiv="Content-Type"><meta content="/images/branding/googleg/1
-                    x/...
-RawContent        : HTTP/1.1 200 OK
-                    Connection: close
-                    Conts...
-Forms             : {f}
-Headers           : {[ https://csp.withgoogle.com/csp/gws/other-hp], [Cache-Control, private, max
-                    -age=0], [Content-Type, text/html; charset=UTF-8]...}
-Images            : {@{innerHTML=; n value=zh-HK name=hl>; outerText=; tagName=I
-                    NPUT; th}...}
-Links             : {@{i id=gb_78; class=gbzt;
-                     href=https://play.google.com/?hl=zh-TW&amp;tab=w8}...}
-ParsedHtml        : mshtml.HTMLDocumentClass
-RawContentLength  : 52716
-```    
-如果是如下显示则代表网络没有配置好，请先按上面说的方法解决再试。
-```shell
-root@home:~# wget google.com
-
---2023-07-06 20:26:18--  http://google.com/
-Resolving google.com (google.com)... 142.251.42.238
-Connecting to google.com (google.com)|142.251.42.238|:80... failed: Connection timed out.
-Retrying.
-```
-### 测试佳明国际区网络连通性
-```shell
-ping sso.garmin.com
-```
-```shell
-root@home:~# ping sso.garmin.com
-PING sso.garmin.com.cdn.cloudflare.net (104.17.113.66) 56(84) bytes of data.
-64 bytes from 104.17.113.66 (104.17.113.66): icmp_seq=1 ttl=63 time=1.92 ms
-64 bytes from 104.17.113.66 (104.17.113.66): icmp_seq=2 ttl=63 time=1.27 ms
-64 bytes from 104.17.113.66 (104.17.113.66): icmp_seq=3 ttl=63 time=2.43 ms
-
---- sso.garmin.com.cdn.cloudflare.net ping statistics ---
-
-```
-### 测试中国区网络连通性
-```shell
-ping sso.garmin.cn
-```
-```shell
-root@home:~# ping sso.garmin.cn
-PING sso.garmin.cn (61.150.74.194) 56(84) bytes of data.
-64 bytes from 61.150.74.194: icmp_seq=1 ttl=63 time=1.69 ms
-64 bytes from 61.150.74.194: icmp_seq=2 ttl=63 time=2.77 ms
-64 bytes from 61.150.74.194: icmp_seq=3 ttl=63 time=7.12 ms
-
---- sso.garmin.cn ping statistics ---
-
-```
-
-
-### 安装 `NodeJS`
-环境需求Node版本`18`及以上，推荐最新的LTS版本。
-下载地址 [https://nodejs.org/en/](https://nodejs.org/en/)
-### 开启 `yarn` 
-
-`NodeJS` 安装完毕后，新打开一个管理员命令行窗口， 输入命令执行
+## 本地开发
 
 ```shell
-corepack enable
+corepack yarn            # 安装依赖（本机 yarn 不在 PATH，用 corepack）
+corepack yarn build      # tsc 构建
+corepack yarn service    # 本地起 EC2 服务（需要 .env）
+
+# 常用脚本
+corepack yarn sync_cn                # 账号1 同步（读环境变量）
+corepack yarn export_global_token    # 导出国际区 token（见上面「②」）
+node scripts/sync-report.js          # 统计过去 24h 同步条数（每日简报用）
 ```
 
-### 安装依赖
-在`README.md`同级目录打开命令行，执行
-
-Windows在文件管理器中打开脚本所在的目录，在地址栏输入 `cmd` 然后回车，即可打开命令行，这个步骤不需要管理员权限
-
-```shell
-yarn
-```
-### 填入账号密码
-打开 `src/constant.ts`,
-填入您的佳明账号及密码
-```js
-//中国区
-export const GARMIN_USERNAME_DEFAULT = 'example@example.com';
-export const GARMIN_PASSWORD_DEFAULT = 'password';
-//国际区
-export const GARMIN_GLOBAL_USERNAME_DEFAULT = 'example@example.com';
-export const GARMIN_GLOBAL_PASSWORD_DEFAULT = 'password';
-
-// 佳明迁移数量配置（批量同步历史数据使用）
-export const GARMIN_MIGRATE_NUM_DEFAULT = 100; //每次要迁移的数量，不要填太大
-export const GARMIN_MIGRATE_START_DEFAULT = 0; // 从第几条活动开始
+主要代码：
 
 ```
-
-### 运行脚本
-注意： 如果执行不能成功，请尝试将梯子更换为美国IP，多更换几个ip试试
-
-同步中国区到国际区
-```shell
-yarn sync_cn
-```
-同步国际区到中国区
-```shell
-yarn sync_global
-```
-迁移历史数据：中国区到国际区
-```shell
-yarn migrate_garmin_cn_to_global
-```
-迁移历史数据：国际区到中国区
-```shell
-yarn migrate_garmin_global_to_cn
+src/
+├─ index.ts                    # EC2 Express 服务（webhook / 管理页 / 自愈重登录）
+├─ service/
+│  ├─ account2_auth.ts         # Playwright 国区登录 + autoLogin + token 导入
+│  ├─ mail_code_fetcher.ts     # IMAP 自动读 Garmin 验证码（过滤 #000000 等假阳性）
+│  ├─ account2_ui.ts           # 管理页 HTML
+│  └─ config.ts                # 服务配置（env）
+├─ utils/
+│  ├─ garmin_cn.ts             # 国区客户端 + 同步逻辑（指纹差集、瞬时错误区分）
+│  ├─ garmin_global.ts         # 国际区客户端（429 按瞬时错误处理）
+│  ├─ garmin_common.ts         # 下载/上传/Bark/token 持久化
+│  └─ sqlite.ts                # session 加密存取（AES）
+├─ mfa/garmin_sso_mfa.ts       # 国区 SSO MFA 流程（axios 版，账号1 回退路径）
+└─ export_garmin_global_session.ts  # 国际区 token 导出（裸 https + 铸票模式）
+scripts/sync-report.js         # 每日简报「运动数据同步」统计
 ```
 
-#### 常见问题
+## 踩坑记录（重要）
 
-如果上面ping都正常，却仍然不能正常运行，请尝试将梯子更换为美国IP
+- **国际区 429 不是限速**：2026-03 起 Garmin 在 `sso.garmin.com` 前上了 Cloudflare bot 检测（TLS 指纹层面），非浏览器客户端密码登录直接 429，反复重试会升级成账号级封锁（48-72h）。解法就是上面的「浏览器铸票」。国区 `garmin.cn` 无此限制。
+- **`connectus.garmin.cn` 是国际账号的国内前端**，背后就是 `sso.garmin.com` + `connectapi.garmin.com`，token 通用。
+- **Garmin 验证码邮件是纯 HTML**，正文里 `#000000` 颜色值会被 `\d{6}` 误当验证码——取码要按关键词就近匹配并过滤噪声（`mail_code_fetcher.ts` 已处理）。
+- **OAuth1 token 约 1 年有效，OAuth2 短效可自动刷新**——所以所有登录难题都只需要一年解决一次，平时只刷新。
+- 同步/登录相关的关键事件会发 **Bark 通知**，出问题第一时间能看到。
 
-## 定时任务(Linux Only)
-上面手动执行名称成功迁移后，可以添加定时任务来自动执行
+## 致谢与许可
 
-`crontab -e` 打开定时任务编辑，按需添加： 
-
-### 每3小时检查并同步国际区到中国区【可选】,注意PATH和SHELL两行也要写上
-```cron
-PATH=$PATH:/usr/local/bin:/usr/bin
-SHELL=/bin/bash
-0 */3 * * * cd /root/code/dailysync/ && yarn --cwd /root/code/dailysync/ sync_global >> /var/log/dailysync.log 2>&1
-```
-### 每3小时检查并同步中国区到国际区【可选】,注意PATH和SHELL两行也要写上
-```cron
-PATH=$PATH:/usr/local/bin:/usr/bin
-SHELL=/bin/bash
-0 */3 * * * cd /root/code/dailysync/ && yarn --cwd /root/code/dailysync/ sync_cn >> /var/log/dailysync.log 2>&1
-```
-其中 `/root/code/dailysync/`为脚本在机器上的目录地址，更换为您机器上的目录即可
-
-![](./assets/crontab-e.png)
-
-### 运行日志查看
-
-```shell
-tail -100f /var/log/dailysync.log
-```
-
-### 修改定时任务执行频率
-当前为 `*/10 * * * *` 每 10 分钟执行一次
-
-您可以按需修改， 参考网址 [https://crontab.guru/examples.html](https://crontab.guru/examples.html)
-
-列举几个常用的：
-
-每小时执行一次： `0 * * * *`
-
-每6小时执行一次： `0 */6 * * *`
-
-每12小时执行一次： `0 */12 * * *`
-
-
-------------
-
-
-**自动 安全 省心**
-
-**如果看不到此文档的图片，请移步 [知乎链接](https://zhuanlan.zhihu.com/p/543799435)**
-
-此工具实现了佳明运动活动数据（生理数据如睡眠，身体电量，**步数**
-等除外）的一次性迁移与日常运动数据同步，实现同步运动数据到到Strava [Strava全球热图](https://www.strava.com/heatmap) 。 额外还实现了RQ数据采集记录跑力的长期趋势及自动签到。
-
-## 功能
-
-### 迁移数据
-
-- 支持佳明账号中已有的运动数据从中国区一次性迁移到国际区。对应 `Action`: `Migrate Garmin CN to Garmin Global`
-- 支持佳明账号中已有的运动数据从国际区一次性迁移到中国区。对应 `Action`: `Migrate Garmin Global to Garmin CN`
-
-### 同步数据
-
-- 约每20分钟左右检查当前中国区账号中是否有新的运动数据，如有则自动下载上传到国际区，并同步到Strava。 对应 `Action`: `Sync Garmin CN to Garmin Global`
-- 如果您常用的是国际区，想要在国内运动软件（悦跑圈/咕咚/keep/郁金香等等）同步运动数据及微信运动中显示 【Garmin手表 骑行xx分钟】（[微信运动效果](./assets/wx_sport.jpg)）
-  此工具可以实现自动反向同步中国区。 对应 `Action`: `Sync Garmin Global to Garmin CN`
-  - 微信步数同步：
-    - `iOS`: 佳明爱运动小程序绑定后，国际区->中国区同步仅能同步活动数据。出去运动不带手机的话，步数会记录在手表中，活动同步后，`Connect`会将步数上传到`健康` App 中，微信与健康应用链接，即可在微信运动中看到步数。
-    - `Android`: 暂无可行方法。
-- 如无特殊需求，强烈建议不要将两个同步脚本同时打开，按需开启一个即可！ 
-
-## 说明
-
-#### 免责声明：
-
-本工具仅限用于学习和研究使用，不得用于商业或者非法用途。如有任何问题可联系本人删除。
-
-#### 账号安全：
-
-账号及密码保存在自己的 `github secrets` 中，不会泄露，运行代码均 **开放源码**，欢迎提交`PR`。
-
-#### 进群讨论
-
-为方便讨论，请加我绿色软件：nononopass （下面扫码）我拉你进群。`nononopass`  我拉你进群。
-![二维码扫码](./assets/wechat_qr.png)
+基于 [gooin/dailysync-rev](https://github.com/gooin/dailysync-rev)（GPL-3.0）二次开发，同步核心思路来自上游，感谢原作者。不熟悉代码的用户可以用原作者的 [Web 版](https://dailysync.vyzt.dev/)。本仓库仅自用，License 见 [LICENSE.txt](LICENSE.txt)。

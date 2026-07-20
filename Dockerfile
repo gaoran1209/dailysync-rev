@@ -12,7 +12,6 @@ RUN yarn install --frozen-lockfile
 RUN npx playwright install --with-deps chromium
 
 COPY src ./src
-COPY assets ./assets
 COPY LICENSE.txt README.md ./
 
 RUN yarn build

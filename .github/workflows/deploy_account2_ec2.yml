@@ -7,7 +7,6 @@ on:
     paths-ignore:
       - 'db/**'
       - '*.md'
-      - 'assets/**'
   workflow_dispatch:
 
 jobs:
