@@ -1,50 +1,35 @@
 {
   "name": "garmin-daily-sync",
-  "version": "1.0.1",
-  "description": "Migrate, gather, synchronize your Garmin fitness data between China server and Global server.",
-  "main": "dist/index.js",
+  "version": "2.0.0",
+  "description": "把两个佳明国区账号的运动活动定时同步到各自的国际区账号（本机 launchd 运行）",
+  "main": "dist/sync.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "service": "ts-node src/index.ts",
-    "rq": "ts-node src/rq.ts",
-    "sync_cn": "ts-node src/sync_garmin_cn_to_global.ts",
-    "sync_global": "ts-node src/sync_garmin_global_to_cn.ts",
-    "migrate_garmin_global_to_cn": "ts-node src/migrate_garmin_global_to_cn.ts",
-    "migrate_garmin_cn_to_global": "ts-node src/migrate_garmin_cn_to_global.ts",
-    "export_global_token": "ts-node src/export_garmin_global_session.ts",
-    "dev": "nodemon dist/index.js",
-    "watch": "tsc -w"
+    "typecheck": "tsc --noEmit",
+    "sync": "node dist/sync.js",
+    "relogin:account2": "node dist/relogin_account2.js",
+    "relogin:cn": "node dist/relogin_cn.js",
+    "export:global-token": "node dist/export_garmin_global_session.js",
+    "import:global-token": "node dist/import_global_token.js",
+    "report": "node scripts/sync-report.js"
   },
   "author": "yanzhitao",
   "license": "GPL-3.0",
   "dependencies": {
-    "@actions/core": "^1.10.0",
     "@gooin/garmin-connect": "1.8.7",
     "axios": "^0.24.0",
     "crypto-js": "^4.1.1",
     "decompress": "^4.2.1",
-    "express": "^4.17.1",
-    "form-data": "^4.0.0",
-    "garmin-connect": "^1.4.3",
-    "google-auth-library": "^8.0.2",
-    "googleapis": "^100.0.0",
     "imapflow": "^1.4.7",
-    "lodash": "^4.17.21",
     "mailparser": "^3.9.14",
-    "node-fetch": "^3.2.5",
+    "oauth-1.0a": "^2.2.6",
     "playwright": "^1.52.0",
     "qs": "^6.10.3",
     "sqlite": "^4.1.2",
-    "sqlite3": "^5.1.2",
-    "strava-v3": "^2.1.0",
-    "unzipper": "^0.10.11"
+    "sqlite3": "^5.1.2"
   },
   "devDependencies": {
-    "@types/express": "^4.17.13",
     "@types/node": "^16.6.2",
-    "nodemon": "^2.0.9",
-    "ts-node": "^10.0.0",
     "typescript": "^4.3.5"
   }
 }

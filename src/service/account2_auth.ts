@@ -1,7 +1,7 @@
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import { exchangeAndSaveToken, extractTicket } from '../mfa/garmin_sso_mfa';
 import { getGaminCNClient } from '../utils/garmin_cn';
-import { refreshAndSaveToken, sendBarkNotification } from '../utils/garmin_common';
+import { sendBarkNotification } from '../utils/garmin_common';
 import { fetchGarminMfaCode } from './mail_code_fetcher';
 import {
     getAccountAuthState,
@@ -11,12 +11,8 @@ import {
     markAccountAuthError,
     markAccountAuthReady,
     markAccountAuthReauthRequired,
-    saveSessionToDB,
-    updateSessionToDB,
 } from '../utils/sqlite';
-import { getAccount2ServiceConfig } from './config';
-
-const { GarminConnect } = require('@gooin/garmin-connect');
+import { getAccount2AuthConfig } from './config';
 
 export interface Account2StatusSnapshot {
     accountKey: string;
@@ -46,7 +42,7 @@ function sanitizeMessage(message: string): string {
 }
 
 export class Account2AuthService {
-    private readonly config = getAccount2ServiceConfig();
+    private readonly config = getAccount2AuthConfig();
     private contextPromise: Promise<BrowserContext> | null = null;
     private pendingLogin: PendingLoginState | null = null;
     private autoLoginInFlight: Promise<Account2ActionResponse> | null = null;
@@ -74,7 +70,7 @@ export class Account2AuthService {
         if (!mail) {
             return {
                 status: 'reauth_required',
-                message: '未配置 MAIL_IMAP_PASSWORD，无法自动读取验证码，请在管理页人工完成登录',
+                message: '未配置 MAIL_IMAP_PASSWORD，无法自动读取验证码，请先在 .env 里填 163 授权码',
                 account: await this.getStatus(),
             };
         }
@@ -99,7 +95,7 @@ export class Account2AuthService {
         } catch (err) {
             const message = sanitizeMessage(`自动读取验证码失败: ${err.message}`);
             await markAccountAuthError(this.config.accountKey, message);
-            await sendBarkNotification('Garmin CN 自动登录失败', `${message}，可在管理页人工提交验证码`);
+            await sendBarkNotification('Garmin CN 自动登录失败', message);
             return {
                 status: 'error',
                 message,
@@ -117,67 +113,19 @@ export class Account2AuthService {
         return verifyResult;
     }
 
-    /**
-     * 导入【本地/住宅网络】导出的国际区 OAuth token，避免在 EC2 数据中心 IP 上做
-     * 会被 Cloudflare 429 拦截的密码登录。导入后 EC2 只做 token 刷新。
-     */
-    async importGlobalToken(rawPayload: any): Promise<Account2ActionResponse> {
-        await initDB();
-        try {
-            // 兼容两种粘贴格式：{sessionUser, token:{oauth1,oauth2}} 或直接 {oauth1,oauth2}
-            const payload = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
-            const token = payload?.token ?? payload;
-            const oauth1 = token?.oauth1;
-            const oauth2 = token?.oauth2;
-            if (!oauth1 || !(oauth1.oauth_token || oauth1.oauthToken)) {
-                return {
-                    status: 'error',
-                    message: '导入失败：token 格式不正确（缺少 oauth1）',
-                    account: await this.getStatus(),
-                };
-            }
-
-            const sessionUser = this.config.global.username;
-            // 尝试用 token 拉一次 profile 校验（数据中心 IP 通常可用；失败不阻断导入）
-            let validated = false;
-            let profileName = '';
-            try {
-                const GCClient = new GarminConnect({
-                    username: this.config.global.username,
-                    password: this.config.global.password,
-                });
-                GCClient.loadToken(oauth1, oauth2);
-                const p = await GCClient.getUserProfile();
-                profileName = p?.userName || p?.displayName || p?.fullName || '';
-                validated = Boolean(profileName || p);
-            } catch (e: any) {
-                console.log('[Account2Auth] 导入 token 校验 getUserProfile 失败（不阻断保存）:', e?.message);
-            }
-
-            const existing = await getSessionFromDB('GLOBAL', sessionUser).catch(() => undefined);
-            if (existing) {
-                await updateSessionToDB('GLOBAL', { oauth1, oauth2 }, sessionUser);
-            } else {
-                await saveSessionToDB('GLOBAL', { oauth1, oauth2 }, sessionUser);
-            }
-
-            const msg = validated
-                ? `国际区 Token 已导入并校验成功（账号: ${profileName || sessionUser}）`
-                : '国际区 Token 已导入并保存（未能在线校验，将在下次同步时验证）';
-            console.log('[Account2Auth]', msg);
-            const account = await this.getStatus();
-            return { status: account.status, message: msg, account };
-        } catch (err: any) {
-            const message = sanitizeMessage(`导入国际区 Token 失败: ${err?.message ?? err}`);
-            const account = await this.getStatus();
-            return { status: account.status, message, account };
-        }
+    /** 释放常驻的 Chromium。CLI 收尾必须调，否则进程不会自然退出。 */
+    async close(): Promise<void> {
+        if (!this.contextPromise) return;
+        const contextPromise = this.contextPromise;
+        this.contextPromise = null;
+        this.pendingLogin = null;
+        await contextPromise.then(ctx => ctx.close()).catch(() => undefined);
     }
 
     async getStatus(): Promise<Account2StatusSnapshot> {
         await initDB();
         const state = await getAccountAuthState(this.config.accountKey);
-        const hasStoredCnSession = Boolean(await getSessionFromDB('CN', this.config.cn.username).catch(() => undefined));
+        const hasStoredCnSession = Boolean(await getSessionFromDB('CN', this.config.cn.sessionUser).catch(() => undefined));
         const currentUrl = this.pendingLogin && !this.pendingLogin.page.isClosed()
             ? this.pendingLogin.page.url()
             : null;
@@ -261,7 +209,7 @@ export class Account2AuthService {
                 await markAccountAuthAwaitingCode(this.config.accountKey);
                 return {
                     status: 'awaiting_code',
-                    message: '验证码邮件已发送，请在管理页提交邮箱验证码完成登录',
+                    message: '验证码邮件已发送，等待从邮箱读取验证码',
                     account: await this.getStatus(),
                 };
             }
@@ -558,24 +506,20 @@ export class Account2AuthService {
     }
 
     private async finalizeSuccessfulLogin(ticket: string, successMessage: string): Promise<Account2ActionResponse> {
-        // 策略 1: 用 ticket 直接交换 OAuth token
-        try {
-            await exchangeAndSaveToken(ticket, {
-                region: 'CN',
-                sessionUser: this.config.cn.username,
-            });
-            console.log('[Account2Auth] Ticket exchange 成功');
-        } catch (exchangeErr) {
-            console.log('[Account2Auth] Ticket exchange 失败，尝试直接 login:', exchangeErr.message);
-            // 策略 2: MFA 刚完成，同一 IP 短期内不需要再次验证，直接用库的 login
-            await this.loginViaLibraryFallback();
-        }
+        // ticket 是一次性的，这里失败就只能重来一轮（会再收一封验证码邮件）。
+        // 刻意不做「退回到库的 login()」兜底：库对 MFA 账号的处理是空实现，必然失败，
+        // 而且会再触发一封验证码邮件，纯粹是骚扰 + 增加佳明侧风控计数。
+        await exchangeAndSaveToken(ticket, {
+            region: 'CN',
+            sessionUser: this.config.cn.sessionUser,
+        });
+        console.log('[Account2Auth] Ticket exchange 成功');
 
         await getGaminCNClient({
+            label: '账号2 国区',
             username: this.config.cn.username,
             password: this.config.cn.password,
-            sessionUser: this.config.cn.username,
-            loginMode: 'token_only',
+            sessionUser: this.config.cn.sessionUser,
             authStateKey: this.config.accountKey,
         });
         await markAccountAuthReady(this.config.accountKey);
@@ -585,16 +529,6 @@ export class Account2AuthService {
             message: successMessage,
             account: await this.getStatus(),
         };
-    }
-
-    private async loginViaLibraryFallback(): Promise<void> {
-        const GCClient = new GarminConnect({
-            username: this.config.cn.username,
-            password: this.config.cn.password,
-        }, 'garmin.cn');
-        await GCClient.login(this.config.cn.username, this.config.cn.password);
-        await refreshAndSaveToken(GCClient, 'CN', this.config.cn.username);
-        console.log('[Account2Auth] Library login fallback 成功');
     }
 }
 

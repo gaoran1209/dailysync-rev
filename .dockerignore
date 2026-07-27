@@ -1,9 +1,0 @@
-.git
-.github
-node_modules
-dist
-db/garmin.db
-db/mfa_state.json
-garmin_fit_files
-*.log
-.env

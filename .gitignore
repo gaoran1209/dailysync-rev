@@ -1,42 +1,22 @@
+node_modules
 dist
-node_modules
 *.log
-garmin_fit_files
-.env
-./src/constant.my.ts
-
-# Virtual environment
-bin/
-include/
-lib/
-pyvenv.cfg
-
-.cache
-*.pyc
-node_modules
 yarn-error.log
-data
-logs
 
-/public
-# Build directory
-/build
+# 环境变量（账号密码、邮箱授权码）绝不入库
+.env
+.env.*
+!.env.example
+src/constant.my.ts
+
+# 运行时状态（sqlite session/token、Playwright profile、FIT 文件、日志）一律放在
+# ~/.dailysync/ ，不在仓库里。这两条只是防止误建同名目录时被提交。
+db/
+data/
+logs/
+garmin_fit_files/
+
 .DS_Store
-.sass-cache/
-_posts/
-_site/
-
-.mypy_cache
-
-/.vscode
 .idea
-
-config.yaml
-
-# MFA 中间状态与本地 sqlite WAL 文件不入库
-db/mfa_state.json
-db/*.db-shm
-db/*.db-wal
+/.vscode
 .maestro/
-# 本地导出的国际区 token，绝不入库
-db/global_token.json

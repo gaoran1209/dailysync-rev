@@ -1,27 +1,16 @@
 /**
- * Garmin CN SSO MFA 登录流程
+ * 佳明国区 SSO 的两个原语：
+ *   1. ssoPasswordLogin  —— 账号密码换 ServiceTicket（无 MFA 的账号才能走通）
+ *   2. exchangeAndSaveToken —— 用 ServiceTicket 换 OAuth1/OAuth2 并落库
  *
- * 流程:
- *   1. requestMfaCode: POST 用户名密码 → 佳明发验证码邮件 → 返回 CSRF token + cookies
- *   2. verifyMfaCode: POST 验证码 + CSRF → 获取 ServiceTicket
- *   3. exchangeTokens: 用 ServiceTicket 交换 OAuth tokens → 保存到 DB
+ * 开了 ECG 的账号（账号2）强制邮箱验证码，走不通 ①，改由
+ * src/service/account2_auth.ts 用 Playwright + IMAP 完成，拿到 ticket 后同样调 ②。
  */
 
 import axios from 'axios';
 import * as qs from 'qs';
-import { GARMIN_URL_DEFAULT, UA_DEFAULT } from '../constant';
-import { initDB, saveSessionToDB, updateSessionToDB, getSessionFromDB } from '../utils/sqlite';
-
-// MFA 中间状态存储 (用于在两个 workflow 之间传递 CSRF + cookies)
-export interface MfaState {
-    csrf: string;
-    cookies: string;
-    timestamp: number;
-    username?: string;
-    fromPage?: string;
-    verifyPath?: string;
-    hiddenFields?: Record<string, string>;
-}
+import { GARMIN_URL_DEFAULT, HTTP_TIMEOUT_MS, UA_DEFAULT } from '../constant';
+import { getSessionFromDB, initDB, saveSessionToDB, updateSessionToDB } from '../utils/sqlite';
 
 const SSO_BASE = 'https://sso.garmin.cn/sso';
 // 关键: ticket 的 service 必须与 @gooin/garmin-connect 库 OAuth1 交换时的
@@ -29,22 +18,22 @@ const SSO_BASE = 'https://sso.garmin.cn/sso';
 const SSO_EMBED = 'https://sso.garmin.cn/sso/embed';
 
 const COMMON_PARAMS = {
-    'id': 'gauth-widget',
-    'embedWidget': 'true',
-    'clientId': 'GarminConnect',
-    'locale': 'en',
-    'gauthHost': SSO_EMBED,
-    'service': SSO_EMBED,
-    'source': SSO_EMBED,
-    'redirectAfterAccountLoginUrl': SSO_EMBED,
-    'redirectAfterAccountCreationUrl': SSO_EMBED,
+    id: 'gauth-widget',
+    embedWidget: 'true',
+    clientId: 'GarminConnect',
+    locale: 'en',
+    gauthHost: SSO_EMBED,
+    service: SSO_EMBED,
+    source: SSO_EMBED,
+    redirectAfterAccountLoginUrl: SSO_EMBED,
+    redirectAfterAccountCreationUrl: SSO_EMBED,
 };
 
-/**
- * 从 HTML 响应中提取 CSRF token
- */
+export function getGarminCnSigninUrl(): string {
+    return `${SSO_BASE}/signin?${qs.stringify(COMMON_PARAMS)}`;
+}
+
 function extractCsrf(html: string): string | null {
-    // 尝试多种匹配方式
     const patterns = [
         /name="_csrf"\s+value="([^"]+)"/,
         /name='_csrf'\s+value='([^']+)'/,
@@ -58,9 +47,7 @@ function extractCsrf(html: string): string | null {
     return null;
 }
 
-/**
- * 从 HTML 或 URL 中提取 ServiceTicket
- */
+/** 从 HTML 或 URL 中提取 ServiceTicket */
 export function extractTicket(input: string): string | null {
     if (!input) return null;
 
@@ -96,76 +83,17 @@ export function extractTicket(input: string): string | null {
     return null;
 }
 
-export function getGarminCnSigninUrl(): string {
-    return `${SSO_BASE}/signin?${qs.stringify(COMMON_PARAMS)}`;
-}
-
-function extractHiddenInputValue(html: string, inputName: string): string | null {
-    const escaped = inputName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const patterns = [
-        new RegExp(`<input[^>]*name="${escaped}"[^>]*value="([^"]+)"`, 'i'),
-        new RegExp(`<input[^>]*value="([^"]+)"[^>]*name="${escaped}"`, 'i'),
-        new RegExp(`<input[^>]*name='${escaped}'[^>]*value='([^']+)'`, 'i'),
-        new RegExp(`<input[^>]*value='([^']+)'[^>]*name='${escaped}'`, 'i'),
-    ];
-    for (const pattern of patterns) {
-        const match = html.match(pattern);
-        if (match?.[1]) return match[1];
-    }
-    return null;
-}
-
-function extractVerifyPath(html: string): string | null {
-    const patterns = [
-        /<form[^>]*action="([^"]*verifyMFA[^"]*)"/i,
-        /<form[^>]*action='([^']*verifyMFA[^']*)'/i,
-    ];
-    for (const pattern of patterns) {
-        const match = html.match(pattern);
-        if (match?.[1]) return match[1];
-    }
-    return null;
-}
-
-function extractHiddenInputs(html: string): Record<string, string> {
-    const result: Record<string, string> = {};
-    const inputRegex = /<input[^>]*>/gi;
-    const nameRegex = /name\s*=\s*["']([^"']+)["']/i;
-    const valueRegex = /value\s*=\s*["']([^"']*)["']/i;
-    const inputTags = html.match(inputRegex) || [];
-    for (const tag of inputTags) {
-        const nameMatch = tag.match(nameRegex);
-        if (!nameMatch?.[1]) continue;
-        const valueMatch = tag.match(valueRegex);
-        result[nameMatch[1]] = valueMatch?.[1] ?? '';
-    }
-    return result;
-}
-
-function resolveVerifyUrl(pathOrUrl: string | undefined): string {
-    if (!pathOrUrl) return `${SSO_BASE}/verifyMFA/loginEnterMfaCode`;
-    if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) return pathOrUrl;
-    if (pathOrUrl.startsWith('/')) return `https://sso.garmin.cn${pathOrUrl}`;
-    return `${SSO_BASE}/${pathOrUrl}`;
-}
-
-/**
- * 合并 Set-Cookie headers 为 cookie 字符串
- */
 function mergeCookies(existingCookies: string, setCookieHeaders: string | string[] | undefined): string {
     if (!setCookieHeaders) return existingCookies;
     const headers = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
     const cookieMap = new Map<string, string>();
 
-    // 解析现有 cookies
     if (existingCookies) {
         existingCookies.split(';').forEach(c => {
             const [key, ...val] = c.trim().split('=');
             if (key) cookieMap.set(key.trim(), val.join('=').trim());
         });
     }
-
-    // 合并新 cookies
     headers.forEach(h => {
         const parts = h.split(';')[0].trim().split('=');
         if (parts[0]) {
@@ -176,309 +104,115 @@ function mergeCookies(existingCookies: string, setCookieHeaders: string | string
     return Array.from(cookieMap.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
 }
 
-/**
- * Step 1: 发送用户名密码，触发佳明发送验证码邮件
- * @returns MfaState 包含 CSRF token 和 cookies，供 verifyMfaCode 使用
- */
-export async function requestMfaCode(username: string, password: string): Promise<MfaState> {
-    console.log('[MFA] Step 1: 发送登录请求，触发验证码邮件...');
+export type SsoPasswordLoginResult =
+    | { outcome: 'ticket'; ticket: string }
+    | { outcome: 'mfa_required' }
+    | { outcome: 'rejected'; detail: string };
 
-    // 1.0 与库的 login 流程一致，先 GET sso/embed 建立 CAS 初始 cookies
+/** 页面里出现这些标记才说明佳明真的进入了验证码环节 */
+function looksLikeMfaPage(html: string, location: string): boolean {
+    return /verifyMFA/i.test(location)
+        || /verifyMFA|mfa-code|one[-\s]?time[-\s]?code/i.test(html);
+}
+
+/**
+ * 用账号密码走国区 SSO。
+ *
+ * 三种结果必须分清楚——早期版本把「没拿到 ticket」一律当成需要验证码，结果密码
+ * 错误也会被报成「需要邮箱验证码」，既误导人，又会让人反复重试去撞佳明的登录失败计数。
+ */
+export async function ssoPasswordLogin(username: string, password: string): Promise<SsoPasswordLoginResult> {
+    console.log('[SSO] 用账号密码发起国区登录...');
+
+    // 与库的 login 流程一致，先 GET sso/embed 建立 CAS 初始 cookies
     const embedResp = await axios.get(
         `${SSO_EMBED}?${qs.stringify({ clientId: 'GarminConnect', locale: 'en', service: GARMIN_URL_DEFAULT.MODERN_URL })}`,
         {
             headers: { 'User-Agent': UA_DEFAULT },
             maxRedirects: 5,
+            timeout: HTTP_TIMEOUT_MS,
             validateStatus: (s: number) => s < 400,
         },
     );
     let cookies = mergeCookies('', embedResp.headers['set-cookie']);
 
-    // 1.1 再获取登录页面的 CSRF token
     const signinUrl = getGarminCnSigninUrl();
     const pageResp = await axios.get(signinUrl, {
-        headers: { 'User-Agent': UA_DEFAULT, 'Cookie': cookies },
+        headers: { 'User-Agent': UA_DEFAULT, Cookie: cookies },
         maxRedirects: 0,
+        timeout: HTTP_TIMEOUT_MS,
         validateStatus: (s: number) => s < 400,
     });
 
     cookies = mergeCookies(cookies, pageResp.headers['set-cookie']);
-    let csrf = extractCsrf(pageResp.data);
-
+    const csrf = extractCsrf(pageResp.data);
     if (!csrf) {
-        throw new Error('[MFA] 无法从登录页面提取 CSRF token');
+        throw new Error('[SSO] 无法从登录页面提取 CSRF token（佳明可能改版了登录页）');
     }
-    console.log('[MFA] 获取到 CSRF token');
 
-    // 1.2 POST 用户名密码
     const loginResp = await axios.post(
         signinUrl,
-        qs.stringify({
-            'username': username,
-            'password': password,
-            'embed': 'true',
-            '_csrf': csrf,
-        }),
+        qs.stringify({ username, password, embed: 'true', _csrf: csrf }),
         {
             headers: {
                 'User-Agent': UA_DEFAULT,
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'Cookie': cookies,
-                'Origin': 'https://sso.garmin.cn',
-                'Referer': signinUrl,
+                Cookie: cookies,
+                Origin: 'https://sso.garmin.cn',
+                Referer: signinUrl,
             },
             maxRedirects: 0,
+            timeout: HTTP_TIMEOUT_MS,
             validateStatus: (s: number) => s < 500,
         },
     );
 
-    cookies = mergeCookies(cookies, loginResp.headers['set-cookie']);
-
-    // 某些场景会先 302 到 verifyMFA 页面，这里主动跟进，确保拿到最新 csrf/fromPage
-    let responseHtml = typeof loginResp.data === 'string' ? loginResp.data : '';
-    const location = loginResp.headers['location'] as string | undefined;
-    if ((!responseHtml || !responseHtml.includes('_csrf')) && location) {
-        const maybeVerifyUrl = resolveVerifyUrl(location);
-        if (maybeVerifyUrl.includes('/verifyMFA/')) {
-            const verifyPageResp = await axios.get(maybeVerifyUrl, {
-                headers: {
-                    'User-Agent': UA_DEFAULT,
-                    'Cookie': cookies,
-                    'Referer': signinUrl,
-                },
-                maxRedirects: 5,
-                validateStatus: (s: number) => s < 500,
-            });
-            cookies = mergeCookies(cookies, verifyPageResp.headers['set-cookie']);
-            responseHtml = typeof verifyPageResp.data === 'string' ? verifyPageResp.data : responseHtml;
-        }
+    const responseHtml = typeof loginResp.data === 'string' ? loginResp.data : '';
+    const location = String(loginResp.headers['location'] ?? '');
+    const ticket = extractTicket(responseHtml) ?? extractTicket(location);
+    if (ticket) {
+        console.log('[SSO] 登录成功，已拿到 ServiceTicket（该账号无需 MFA）');
+        return { outcome: 'ticket', ticket };
     }
 
-    // 检查是否直接登录成功（不需要 MFA）
-    const directTicket = extractTicket(responseHtml);
-    if (directTicket) {
-        console.log('[MFA] 账号无需 MFA，直接登录成功');
-        // 此处不应该发生在 ECG 开启的账号，但做个兼容
-        throw new Error(`NO_MFA_NEEDED:${directTicket}`);
+    if (looksLikeMfaPage(responseHtml, location)) {
+        console.log('[SSO] 佳明要求邮箱验证码，密码登录这条路走不通');
+        return { outcome: 'mfa_required' };
     }
 
-    // 从 MFA 页面提取新的 CSRF token
-    const mfaCsrf = extractCsrf(responseHtml);
-    if (mfaCsrf) {
-        csrf = mfaCsrf;
-    }
-
-    // 检查是否包含 MFA 相关内容（仅作为日志参考，不再作为硬判断）
-    const isMfaPage = responseHtml.includes('verifyMFA') ||
-        responseHtml.includes('mfa-code') ||
-        responseHtml.includes('MFA') ||
-        responseHtml.includes('verification') ||
-        responseHtml.includes('验证码');
-
-    if (isMfaPage) {
-        console.log('[MFA] ✅ 检测到 MFA 验证页面，验证码邮件已发送');
-    } else {
-        // 即使页面未检测到 MFA 关键词，只要没有直接返回 ticket，
-        // 就说明登录被拦截了（MFA 已触发，邮件已发送）
-        console.log('[MFA] ⚠️ 响应页面未检测到 MFA 关键词，但无直接 ticket，假定 MFA 已触发');
-        console.log('[MFA] 响应状态码:', loginResp.status);
-        console.log('[MFA] 响应内容(前500字符):', responseHtml.substring(0, 500));
-    }
-
-    console.log('[MFA] ✅ 请检查邮箱获取验证码');
-
-    const fromPage = extractHiddenInputValue(responseHtml, 'fromPage') || 'loginEnterMfaCode';
-    const verifyPath = extractVerifyPath(responseHtml) || location || '/sso/verifyMFA/loginEnterMfaCode';
-    const hiddenFields = extractHiddenInputs(responseHtml);
-
-    return {
-        csrf,
-        cookies,
-        timestamp: Date.now(),
-        username,
-        fromPage,
-        verifyPath,
-        hiddenFields,
-    };
+    // 既没有 ticket、也没有验证码页面：绝大多数情况是账号密码不对，或者佳明改了登录页
+    const snippet = responseHtml.replace(/\s+/g, ' ').trim().slice(0, 200);
+    console.log(`[SSO] 登录被拒，HTTP ${loginResp.status}`);
+    return { outcome: 'rejected', detail: snippet || `HTTP ${loginResp.status}` };
 }
 
 /**
- * Step 2: 提交 MFA 验证码，获取 ServiceTicket
- * @param code 用户从邮件中获取的 6 位验证码
- * @param state 从 requestMfaCode 返回的中间状态
- * @returns ServiceTicket
- */
-export async function verifyMfaCode(code: string, state: MfaState): Promise<string> {
-    console.log('[MFA] Step 2: 提交验证码...');
-
-    // 检查 state 是否过期（30分钟有效期）
-    const elapsed = Date.now() - state.timestamp;
-    if (elapsed > 30 * 60 * 1000) {
-        throw new Error('[MFA] 验证码已过期（超过30分钟），请重新请求');
-    }
-
-    const verifyUrl = resolveVerifyUrl(state.verifyPath);
-    const fromPage = state.fromPage || 'loginEnterMfaCode';
-    const verifyFormData: Record<string, string> = {
-        ...(state.hiddenFields || {}),
-        'mfa-code': code,
-        // 兼容不同页面字段命名
-        'mfaCode': code,
-        '_csrf': state.csrf,
-        'fromPage': fromPage,
-        'embed': 'true',
-    };
-    console.log('[MFA] 验证提交目标:', verifyUrl);
-    console.log('[MFA] 验证提交 fromPage:', fromPage);
-    console.log('[MFA] MFA 隐藏字段数量:', Object.keys(state.hiddenFields || {}).length);
-
-    const verifyResp = await axios.post(
-        verifyUrl,
-        qs.stringify(verifyFormData),
-        {
-            headers: {
-                'User-Agent': UA_DEFAULT,
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Cookie': state.cookies,
-                'Origin': 'https://sso.garmin.cn',
-                'Referer': verifyUrl,
-            },
-            maxRedirects: 0,
-            validateStatus: (s: number) => s < 500,
-        },
-    );
-
-    const responseHtml = typeof verifyResp.data === 'string' ? verifyResp.data : '';
-
-    // 尝试从响应或重定向 URL 中提取 ticket
-    let ticket = extractTicket(responseHtml);
-
-    // 如果从 body 没找到，检查 Location header
-    if (!ticket && verifyResp.headers['location']) {
-        ticket = extractTicket(verifyResp.headers['location']);
-    }
-
-    if (!ticket) {
-        console.error('[MFA] 无法获取 ServiceTicket');
-        console.error('[MFA] 响应状态:', verifyResp.status);
-        console.error('[MFA] 响应 Location:', verifyResp.headers['location'] || '');
-        console.error('[MFA] 响应内容(前500字符):', responseHtml.substring(0, 500));
-        throw new Error('[MFA] 验证码验证失败，请检查验证码是否正确或已过期');
-    }
-
-    console.log('[MFA] ✅ 验证码验证成功，获取到 ServiceTicket');
-    return ticket;
-}
-
-/**
- * Step 3: 用 ServiceTicket 登录 GarminConnect 并保存 token
- * @param ticket ServiceTicket
+ * 用 ServiceTicket 换 OAuth1/OAuth2 并落库。
+ *
+ * 注意: ServiceTicket 是一次性的。绝不能先访问 modern/?ticket= 页面，
+ * 否则 ticket 被 CAS 消费，后面的 OAuth1 交换必然失败。
  */
 export async function exchangeAndSaveToken(
     ticket: string,
-    options: {
-        region?: 'CN' | 'GLOBAL';
-        sessionUser?: string;
-    } = {},
+    options: { region: 'CN' | 'GLOBAL'; sessionUser: string },
 ): Promise<void> {
-    console.log('[MFA] Step 3: 用 ServiceTicket 交换 OAuth tokens...');
-
     const { GarminConnect } = require('@gooin/garmin-connect');
-    const region = options.region ?? 'CN';
-    const sessionUser = options.sessionUser;
+    const { region, sessionUser } = options;
 
-    // 注意: ServiceTicket 是一次性的。这里绝不能先访问 modern/?ticket= 页面，
-    // 否则 ticket 被 CAS 消费，后面的 OAuth1 交换必然失败。
-    console.log('[MFA] 尝试使用 ServiceTicket 获取 OAuth tokens...');
+    console.log('[SSO] 用 ServiceTicket 交换 OAuth token...');
+    const GCClient = new GarminConnect({}, region === 'CN' ? 'garmin.cn' : 'garmin.com');
 
-    // 使用 GarminConnect 的底层方法来完成 token 交换
-    const GCClient = new GarminConnect({}, 'garmin.cn');
+    await GCClient.client.fetchOauthConsumer();
+    const oauth1Res = await GCClient.client.getOauth1Token(ticket);
+    await GCClient.client.exchange(oauth1Res);
+    const token = GCClient.exportToken();
 
-    try {
-        // Step 1: Initialize OAuth Consumer mapping internal to GarminConnect
-        await GCClient.client.fetchOauthConsumer();
-
-        // Step 2: Use ticket to request and fetch OAuth1 token
-        const oauth1Res = await GCClient.client.getOauth1Token(ticket);
-
-        // Step 3: Exchange Oauth1 for Oauth2 Token properly
-        await GCClient.client.exchange(oauth1Res);
-
-        // Step 4: Export standardized Token string
-        const token = GCClient.exportToken();
-
-        // 把完整 Token（包括 OAuth1 & OAuth2）保存到数据库
-        await initDB();
-        const existingSession = await getSessionFromDB(region, sessionUser);
-        if (existingSession) {
-            await updateSessionToDB(region, token, sessionUser);
-        } else {
-            await saveSessionToDB(region, token, sessionUser);
-        }
-
-        console.log('[MFA] ✅ Token (OAuth1 & OAuth2) 已成功保存到数据库');
-    } catch (e) {
-        console.error('[MFA] Token 交换失败:', e.message);
-        throw e;
+    await initDB();
+    const existingSession = await getSessionFromDB(region, sessionUser);
+    if (existingSession) {
+        await updateSessionToDB(region, token, sessionUser);
+    } else {
+        await saveSessionToDB(region, token, sessionUser);
     }
-}
-
-/**
- * MFA 状态写入到临时文件（用于跨 workflow 传递）
- */
-export function saveMfaState(state: MfaState): void {
-    const fs = require('fs');
-    const statePath = './db/mfa_state.json';
-    fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-    console.log(`[MFA] 状态已保存到 ${statePath}`);
-}
-
-/**
- * 从临时文件加载 MFA 状态
- */
-export function loadMfaState(): MfaState {
-    const fs = require('fs');
-    const statePath = './db/mfa_state.json';
-    if (!fs.existsSync(statePath)) {
-        throw new Error('[MFA] 未找到 MFA 状态文件，请先运行 request_mfa');
-    }
-    const data = fs.readFileSync(statePath, 'utf-8');
-    const state = JSON.parse(data) as MfaState & { timestamp: number | string };
-
-    const rawTimestamp = Number(state.timestamp);
-    if (!Number.isFinite(rawTimestamp) || rawTimestamp <= 0) {
-        throw new Error('[MFA] MFA 状态时间戳无效，请重新运行 request_mfa');
-    }
-
-    // 兼容历史格式（秒级时间戳）与当前格式（毫秒时间戳）
-    const normalizedTimestamp = rawTimestamp < 1e12 ? rawTimestamp * 1000 : rawTimestamp;
-    const now = Date.now();
-    const elapsed = now - normalizedTimestamp;
-    const elapsedMinutes = Math.floor(elapsed / 60000);
-    console.log(
-        `[MFA] 状态时间: ${new Date(normalizedTimestamp).toISOString()}, 当前时间: ${new Date(now).toISOString()}, 已过去约 ${elapsedMinutes} 分钟`,
-    );
-
-    // 设置为 25 分钟过期，防止和 verifyMfaCode 的 30 分钟限制冲突
-    const EXPIRY_MS = 25 * 60 * 1000;
-    if (elapsed > EXPIRY_MS) {
-        throw new Error('[MFA] MFA 状态已过期（超过25分钟），请重新运行 request_mfa');
-    }
-
-    return {
-        ...state,
-        timestamp: normalizedTimestamp,
-    };
-}
-
-/**
- * 清理 MFA 状态文件
- */
-export function cleanMfaState(): void {
-    const fs = require('fs');
-    const statePath = './db/mfa_state.json';
-    if (fs.existsSync(statePath)) {
-        fs.unlinkSync(statePath);
-        console.log('[MFA] 临时状态文件已清理');
-    }
+    console.log(`[SSO] ✅ ${region} token (OAuth1 & OAuth2) 已保存到数据库`);
 }

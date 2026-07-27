@@ -1,11 +1,12 @@
-import { AESKEY_DEFAULT, DB_FILE_PATH, GARMIN_USERNAME_DEFAULT } from '../constant';
+import * as fs from 'fs';
+import * as path from 'path';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import { AESKEY_DEFAULT, DB_FILE_PATH } from '../constant';
 
 const CryptoJS = require('crypto-js');
 
-const GARMIN_USERNAME = process.env.GARMIN_USERNAME ?? GARMIN_USERNAME_DEFAULT;
-const AESKEY = process.env.AESKEY ?? AESKEY_DEFAULT;
+const AESKEY = AESKEY_DEFAULT;
 
 export type GarminSessionRegion = 'CN' | 'GLOBAL';
 export type AccountAuthStatus = 'ready' | 'awaiting_code' | 'reauth_required' | 'error';
@@ -19,13 +20,62 @@ export interface AccountAuthState {
     updatedAt: number;
 }
 
-function resolveSessionUser(sessionUser?: string): string {
-    const resolved = sessionUser?.trim() || GARMIN_USERNAME?.trim();
+/**
+ * sessionUser 必须显式传。以前这里会兜底到 process.env.GARMIN_USERNAME，
+ * 结果是任何一处漏传都会静默地把 A 账号的 token 写进 B 账号的行——sqlite 是二进制，
+ * 覆盖了就只能翻备份。现在漏传会当场抛错。
+ */
+function resolveSessionUser(sessionUser: string | undefined): string {
+    const resolved = sessionUser?.trim();
     if (!resolved) {
-        throw new Error('未提供 Garmin session user，请检查账号环境变量配置');
+        throw new Error('内部错误：调用 session 存取时未传 sessionUser');
     }
     return resolved;
 }
+
+/**
+ * 判断解出来的东西是不是一份真 session。
+ *
+ * 背景：历史上有一次 ticket 交换拿到的是佳明「未登录」页面的 HTML，代码没校验就
+ * 存了进去，于是库里躺着一个 5000 多键的字符索引对象。它是 truthy，会绕过
+ * 「没有 session」的判断，一路走到 loadToken({}) → 401 → 被当成瞬时错误，
+ * 表现为每次同步静默空转、永远不提示需要重新登录。
+ */
+function isValidSession(session: any): boolean {
+    const oauth1 = session?.oauth1;
+    return Boolean(oauth1 && typeof oauth1 === 'object' && oauth1.oauth_token && oauth1.oauth_token_secret);
+}
+
+let dbInstance: Awaited<ReturnType<typeof open>> | null = null;
+
+export const getDB = async () => {
+    if (!dbInstance) {
+        fs.mkdirSync(path.dirname(DB_FILE_PATH), { recursive: true });
+        dbInstance = await open({
+            filename: DB_FILE_PATH,
+            driver: sqlite3.Database,
+        });
+        await dbInstance.run('PRAGMA journal_mode=WAL');
+    }
+    return dbInstance;
+};
+
+/**
+ * 收尾必须调这个。WAL 模式下，进程被 process.exit() 强制退出时不会 checkpoint，
+ * 新写入只留在 -wal 文件里；账号2 的重新登录 CLI 因为 Playwright 常驻 Chromium
+ * 吊住事件循环、必须强退，不做 checkpoint 就会静默丢掉刚拿到的 token。
+ */
+export const closeDB = async () => {
+    if (!dbInstance) return;
+    const db = dbInstance;
+    dbInstance = null;
+    try {
+        await db.run('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch (e: any) {
+        console.log('[DB] checkpoint 失败:', e?.message);
+    }
+    await db.close().catch(() => undefined);
+};
 
 export const initDB = async () => {
     const db = await getDB();
@@ -45,43 +95,31 @@ export const initDB = async () => {
         )`);
 };
 
-let dbInstance: Awaited<ReturnType<typeof open>> | null = null;
-
-export const getDB = async () => {
-    if (!dbInstance) {
-        dbInstance = await open({
-            filename: DB_FILE_PATH,
-            driver: sqlite3.Database,
-        });
-        await dbInstance.run('PRAGMA journal_mode=WAL');
-    }
-    return dbInstance;
-};
-
 export const saveSessionToDB = async (
     type: GarminSessionRegion,
     session: Record<string, any>,
-    sessionUser?: string,
+    sessionUser: string,
 ) => {
     const db = await getDB();
     const user = resolveSessionUser(sessionUser);
+    if (!isValidSession(session)) {
+        throw new Error(`拒绝写入无效的 ${type} session（缺少 oauth1.oauth_token），不覆盖已有 token`);
+    }
     const encryptedSessionStr = encryptSession(session);
     await db.run('DELETE FROM garmin_session WHERE user = ? AND region = ?', user, type);
-    await db.run(
-        `INSERT INTO garmin_session (user,region,session) VALUES (?,?,?)`,
-        user,
-        type,
-        encryptedSessionStr,
-    );
+    await db.run('INSERT INTO garmin_session (user,region,session) VALUES (?,?,?)', user, type, encryptedSessionStr);
 };
 
 export const updateSessionToDB = async (
     type: GarminSessionRegion,
     session: Record<string, any>,
-    sessionUser?: string,
+    sessionUser: string,
 ) => {
     const db = await getDB();
     const user = resolveSessionUser(sessionUser);
+    if (!isValidSession(session)) {
+        throw new Error(`拒绝写入无效的 ${type} session（缺少 oauth1.oauth_token），不覆盖已有 token`);
+    }
     const encryptedSessionStr = encryptSession(session);
     const result = await db.run(
         'UPDATE garmin_session SET session = ? WHERE user = ? AND region = ?',
@@ -90,16 +128,11 @@ export const updateSessionToDB = async (
         type,
     );
     if (!result.changes) {
-        await db.run(
-            `INSERT INTO garmin_session (user,region,session) VALUES (?,?,?)`,
-            user,
-            type,
-            encryptedSessionStr,
-        );
+        await db.run('INSERT INTO garmin_session (user,region,session) VALUES (?,?,?)', user, type, encryptedSessionStr);
     }
 };
 
-export const deleteSessionFromDB = async (type: GarminSessionRegion, sessionUser?: string) => {
+export const deleteSessionFromDB = async (type: GarminSessionRegion, sessionUser: string) => {
     const db = await getDB();
     const user = resolveSessionUser(sessionUser);
     await db.run('DELETE FROM garmin_session WHERE user = ? AND region = ?', user, type);
@@ -107,7 +140,7 @@ export const deleteSessionFromDB = async (type: GarminSessionRegion, sessionUser
 
 export const getSessionFromDB = async (
     type: GarminSessionRegion,
-    sessionUser?: string,
+    sessionUser: string,
 ): Promise<Record<string, any> | undefined> => {
     const db = await getDB();
     const user = resolveSessionUser(sessionUser);
@@ -119,13 +152,19 @@ export const getSessionFromDB = async (
     if (!queryResult) {
         return undefined;
     }
+    let session: Record<string, any>;
     try {
-        return decryptSession(queryResult.session);
-    } catch (e) {
+        session = decryptSession(queryResult.session);
+    } catch (e: any) {
         // AESKEY 变更或数据损坏时按无 session 处理，走重新登录而不是让整个同步崩掉
         console.log(`[DB] ${type}/${user} session 解密失败（AESKEY 可能已更换），按无 session 处理: ${e.message}`);
         return undefined;
     }
+    if (!isValidSession(session)) {
+        console.log(`[DB] ${type}/${user} 库里的 session 结构不合法（缺少 oauth1），按无 session 处理`);
+        return undefined;
+    }
+    return session;
 };
 
 export const getAccountAuthState = async (accountKey: string): Promise<AccountAuthState | undefined> => {
@@ -167,12 +206,7 @@ async function upsertAccountAuthState(
     };
     await db.run(
         `INSERT INTO account_auth_state (
-            account_key,
-            status,
-            last_success_at,
-            last_error,
-            last_error_at,
-            updated_at
+            account_key, status, last_success_at, last_error, last_error_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(account_key) DO UPDATE SET
             status = excluded.status,
@@ -220,12 +254,10 @@ export const markAccountAuthError = async (accountKey: string, lastError: string
 };
 
 export const encryptSession = (session: Record<string, any>): string => {
-    const sessionStr = JSON.stringify(session);
-    return CryptoJS.AES.encrypt(sessionStr, AESKEY).toString();
+    return CryptoJS.AES.encrypt(JSON.stringify(session), AESKEY).toString();
 };
 
 export const decryptSession = (sessionStr: string): Record<string, any> => {
     const bytes = CryptoJS.AES.decrypt(sessionStr, AESKEY);
-    const session = bytes.toString(CryptoJS.enc.Utf8);
-    return JSON.parse(session);
+    return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
 };

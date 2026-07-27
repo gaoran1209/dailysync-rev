@@ -3,149 +3,106 @@
  * 每日简报 · 运动数据同步模块
  *
  * 统计过去 N 小时（默认 24）两个佳明账号「国区 → 国际区」各同步了多少条活动，
- * 供 openclaw「每日简报推送」cron 任务调用，告知当天同步了多少数据。
+ * 供 openclaw「每日简报推送」调用。
  *
- * 数据源：GitHub Actions 两个 sync workflow 的运行日志（零侵入，不改同步代码）。
- *   - 账号2 走 EC2 webhook，GitHub 日志里有 webhook 返回的 {"uploadedCount":N}
- *   - 账号1 在 runner 上直接跑，每上传一条打印一行「本次开始向国际区上传第…」
+ * 数据源：~/.dailysync/logs/sync-*.log 里 src/sync.ts 打的 [SYNC-RESULT] {...} 行。
+ * （以前是去扒 GitHub Actions 的日志，同步搬回本机之后改成读本地日志，不再依赖 gh。）
  *
  * 用法：
- *   node scripts/sync-report.js            # 过去 24 小时
- *   SYNC_REPORT_WINDOW_HOURS=48 node ...   # 自定义窗口
- *   node scripts/sync-report.js --json     # 输出 JSON（供程序消费）
- *
- * 依赖：已登录的 gh CLI（gh auth status 正常）。
+ *   node scripts/sync-report.js            # 过去 24 小时，输出中文文本
+ *   node scripts/sync-report.js --json     # 输出 JSON，供程序消费
+ *   SYNC_REPORT_WINDOW_HOURS=48 node scripts/sync-report.js
  */
-const { execFileSync, execFile } = require('child_process');
-const { promisify } = require('util');
 const fs = require('fs');
-const execFileAsync = promisify(execFile);
+const os = require('os');
+const path = require('path');
 
-// 解析 gh 可执行文件路径：cron 的 shell PATH 可能不含 /opt/homebrew/bin，
-// 优先用已知绝对路径（确定性），再回退到 PATH 里的 gh。
-const GH_BIN = (() => {
-    const candidates = [process.env.GH_BIN, '/opt/homebrew/bin/gh', '/usr/local/bin/gh', '/usr/bin/gh'];
-    for (const c of candidates) {
-        try { if (c && fs.existsSync(c)) return c; } catch { /* ignore */ }
-    }
-    return 'gh';
-})();
-
-const REPO = process.env.SYNC_REPORT_REPO || 'gaoran1209/dailysync-rev';
+const DATA_DIR = process.env.DAILYSYNC_DATA_DIR || path.join(os.homedir(), '.dailysync');
+const LOG_DIR = path.join(DATA_DIR, 'logs');
 const WINDOW_HOURS = Number(process.env.SYNC_REPORT_WINDOW_HOURS || 24);
 const SINCE = Date.now() - WINDOW_HOURS * 3600 * 1000;
 const AS_JSON = process.argv.includes('--json');
 
-const ACCOUNTS = [
-    { label: '账号1', who: 'gaoran24', wf: 'sync_garmin_cn_to_garmin_global.yml', mode: 'account1' },
-    { label: '账号2', who: '18380445747', wf: 'sync_garmin_cn_to_garmin_global_account2.yml', mode: 'account2' },
-];
+const ACCOUNT_LABELS = { 1: '账号1', 2: '账号2' };
 
-function gh(args) {
-    try {
-        return execFileSync(GH_BIN, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-    } catch (e) {
-        // gh 对失败的 run 日志可能返回非 0，但 stdout 里仍有内容
-        return (e.stdout && e.stdout.toString()) || '';
-    }
-}
+function readResults() {
+    if (!fs.existsSync(LOG_DIR)) return [];
+    const results = [];
+    // 只读窗口可能覆盖到的那几天的日志文件
+    const keepFiles = Math.max(2, Math.ceil(WINDOW_HOURS / 24) + 1);
+    const files = fs.readdirSync(LOG_DIR)
+        .filter(f => /^sync-\d{4}-\d{2}-\d{2}\.log$/.test(f))
+        .sort()
+        .slice(-keepFiles);
 
-function runList(wf) {
-    const out = gh(['run', 'list', '--repo', REPO, '--workflow', wf, '--limit', '30',
-        '--json', 'databaseId,createdAt,status,conclusion']);
-    try { return JSON.parse(out); } catch { return []; }
-}
-
-function parseCount(log, mode) {
-    if (mode === 'account2') {
-        // webhook 返回 JSON：{"status":"ok","uploadedCount":4,...}
-        const m = log.match(/"uploadedCount":(\d+)/);
-        return m ? Number(m[1]) : 0;
-    }
-    // 账号1：每上传一条活动打印一行
-    const matches = log.match(/本次开始向国际区上传第/g);
-    return matches ? matches.length : 0;
-}
-
-async function logCount(id, mode) {
-    try {
-        const { stdout } = await execFileAsync(GH_BIN, ['run', 'view', String(id), '--repo', REPO, '--log'],
-            { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-        return parseCount(stdout || '', mode);
-    } catch (e) {
-        // 失败 run 的日志可能非 0 退出但 stdout 有内容
-        return parseCount((e.stdout && e.stdout.toString()) || '', mode);
-    }
-}
-
-/** 并发执行任务，限制并发数，避免一次打太多 gh 请求 */
-async function pool(items, worker, concurrency = 6) {
-    const results = new Array(items.length);
-    let i = 0;
-    async function run() {
-        while (i < items.length) {
-            const idx = i++;
-            results[idx] = await worker(items[idx], idx);
+    for (const file of files) {
+        let content;
+        try {
+            content = fs.readFileSync(path.join(LOG_DIR, file), 'utf8');
+        } catch {
+            continue;
+        }
+        for (const line of content.split('\n')) {
+            const idx = line.indexOf('[SYNC-RESULT]');
+            if (idx === -1) continue;
+            try {
+                const parsed = JSON.parse(line.slice(idx + '[SYNC-RESULT]'.length).trim());
+                const at = parsed.at ? Date.parse(parsed.at) : NaN;
+                if (Number.isFinite(at) && at < SINCE) continue;
+                results.push(parsed);
+            } catch {
+                /* 半行日志之类，跳过 */
+            }
         }
     }
-    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
     return results;
 }
 
-async function collect() {
-    const perAccount = [];
-    let grandTotal = 0;
-    let anyFail = false;
-    for (const a of ACCOUNTS) {
-        const runs = runList(a.wf).filter(
-            (r) => r && r.status === 'completed' && new Date(r.createdAt).getTime() >= SINCE,
-        );
-        const successRuns = runs.filter((r) => r.conclusion === 'success');
-        const failed = runs.length - successRuns.length;
-        // 各成功 run 的日志并发拉取
-        const counts = await pool(successRuns, (r) => logCount(r.databaseId, a.mode));
-        const synced = counts.reduce((s, n) => s + (n || 0), 0);
-        grandTotal += synced;
-        if (failed > 0) anyFail = true;
-        perAccount.push({ label: a.label, who: a.who, synced, checks: runs.length, failed });
+function summarize(results) {
+    const summary = {};
+    for (const id of ['1', '2']) {
+        const mine = results.filter(r => String(r.account) === id);
+        const last = mine.length ? mine[mine.length - 1] : null;
+        summary[id] = {
+            label: ACCOUNT_LABELS[id],
+            checks: mine.length,
+            synced: mine.reduce((sum, r) => sum + (Number(r.uploadedCount) || 0), 0),
+            lastStatus: last ? last.status : null,
+            lastMessage: last ? last.message : null,
+            needsAttention: mine.some(r => r.status === 'reauth_required' || r.status === 'failed'),
+        };
     }
-    return { windowHours: WINDOW_HOURS, perAccount, grandTotal, anyFail };
+    return summary;
 }
 
-function render(data) {
-    const lines = [];
-    lines.push(`过去 ${data.windowHours} 小时运动数据同步（国区 → 国际区）`);
-    for (const a of data.perAccount) {
-        const status = a.failed > 0 ? `⚠️ ${a.failed} 次失败` : (a.checks > 0 ? '✅ 正常' : '— 无运行');
-        lines.push(`- ${a.label}(${a.who})：同步 ${a.synced} 条 · ${a.checks} 次检查 · ${status}`);
+function render(summary) {
+    const lines = [`过去 ${WINDOW_HOURS} 小时运动数据同步（国区 → 国际区）`];
+    let total = 0;
+    let anyProblem = false;
+    for (const id of ['1', '2']) {
+        const s = summary[id];
+        total += s.synced;
+        if (!s.checks) {
+            lines.push(`- ${s.label}：— 无运行记录（定时任务可能没跑）`);
+            anyProblem = true;
+            continue;
+        }
+        if (s.needsAttention) {
+            anyProblem = true;
+            lines.push(`- ${s.label}：同步 ${s.synced} 条 · ${s.checks} 次检查 · ⚠️ ${s.lastMessage}`);
+        } else {
+            lines.push(`- ${s.label}：同步 ${s.synced} 条 · ${s.checks} 次检查 · ✅ 正常`);
+        }
     }
-    lines.push(`合计同步 ${data.grandTotal} 条活动${data.anyFail ? '（存在同步失败，建议检查）' : ''}`);
+    lines.push(`合计同步 ${total} 条活动${anyProblem ? '（有需要处理的问题，见上）' : ''}`);
     return lines.join('\n');
 }
 
-// 预检：gh 是否可用且已登录。不可用时明确报错，避免把"取数失败"误报成"同步 0 条"。
-function preflight() {
-    try {
-        execFileSync(GH_BIN, ['auth', 'status'], { stdio: 'ignore' });
-        return true;
-    } catch {
-        return false;
-    }
-}
+const results = readResults();
+const summary = summarize(results);
 
-if (!preflight()) {
-    const msg = '运动数据同步：数据获取失败（gh CLI 未安装或未登录，无法读取 GitHub Actions 运行记录）';
-    if (AS_JSON) {
-        console.log(JSON.stringify({ error: 'gh_unavailable', message: msg }));
-    } else {
-        console.log(msg);
-    }
-    process.exit(0); // 退出 0，让简报能把这行原样展示，而不是整体失败
+if (AS_JSON) {
+    console.log(JSON.stringify({ windowHours: WINDOW_HOURS, summary, results }, null, 2));
+} else {
+    console.log(render(summary));
 }
-
-collect().then((data) => {
-    console.log(AS_JSON ? JSON.stringify(data) : render(data));
-}).catch((e) => {
-    console.log(`运动数据同步：统计出错（${String(e && e.message || e).slice(0, 80)}）`);
-    process.exit(0);
-});

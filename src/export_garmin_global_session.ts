@@ -1,23 +1,34 @@
 /**
- * 在【住宅网络/本机】上给佳明国际区账号登录一次，导出 OAuth token。
+ * 导出佳明国际区的 OAuth token（OAuth1 约 1 年有效）。
  *
- * 为什么要本地跑：2026-03 起 sso.garmin.com 上了 Cloudflare 机器人检测，
- * 数据中心 IP（EC2/GitHub Actions）做密码登录会被 429 拦截。住宅 IP 正常。
- * 导出的 token（OAuth1 约 1 年有效）注入 EC2 后，EC2 只做刷新、不再密码登录。
+ * 为什么不能让同步过程自己登录：2026-03 起 sso.garmin.com 上了 Cloudflare 机器人
+ * 检测，脚本密码登录会被 429，而且限流是按「账号 + clientId」计的，换 IP 没用，
+ * 反复重试会升级成账号级封锁 48-72 小时。所以国际区 token 只在这里手工铸一次。
  *
- * 用法（在项目根目录）：
- *   GARMIN_GLOBAL_USERNAME_2=xxx GARMIN_GLOBAL_PASSWORD_2=xxx yarn export_global_token
- * 或复用账号1 的国际区账号：
- *   GARMIN_GLOBAL_USERNAME=xxx GARMIN_GLOBAL_PASSWORD=xxx yarn export_global_token
+ * 两种用法（在项目根目录）：
+ *   1) 推荐 · 浏览器铸票（绕开 Cloudflare，成功率最高）
+ *      先在 Chrome 里登录国际区，再访问
+ *        https://sso.garmin.com/sso/embed?clientId=GarminConnect&locale=en
+ *      复制地址栏 ticket= 后面的 ST-…-cas，然后：
+ *        GARMIN_GLOBAL_TICKET='ST-…-cas' yarn export:global-token
+ *   2) 直接密码登录（住宅 IP 有一定概率能过）
+ *        yarn export:global-token          # 账号2；账号1 用 GARMIN_GLOBAL_USERNAME
  *
- * 成功后会在 ./db/global_token.json 写入 token，并把 JSON 打印到终端，
- * 复制到 EC2 管理页「导入国际区 Token」即可。
+ * 成功后 token 写到 ~/.dailysync/global_token.json，再跑 yarn import:global-token 落库。
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 import * as https from 'https';
 import * as qs from 'qs';
 import * as crypto from 'crypto';
+import { loadDotEnv } from './utils/dotenv';
+
+// 必须先加载 .env 再 require constant —— constant.ts 在模块加载时就把
+// DAILYSYNC_DATA_DIR / AESKEY 这些读成常量了。用 import 的话它会先于这行执行。
+loadDotEnv();
+const { GLOBAL_TOKEN_PATH } = require('./constant') as typeof import('./constant');
+
 const OAuth = require('oauth-1.0a');
 
 const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -189,26 +200,7 @@ async function exchangeTicketForTokens(ticket: string): Promise<{ oauth1: any; o
     return { oauth1, oauth2 };
 }
 
-/** 轻量加载项目根目录 .env（不引入 dotenv 依赖），已存在的环境变量优先 */
-function loadDotEnv(path = './.env') {
-    if (!fs.existsSync(path)) return;
-    const content = fs.readFileSync(path, 'utf-8');
-    for (const line of content.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const eq = trimmed.indexOf('=');
-        if (eq <= 0) continue;
-        const key = trimmed.slice(0, eq).trim();
-        let val = trimmed.slice(eq + 1).trim();
-        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-            val = val.slice(1, -1);
-        }
-        if (process.env[key] === undefined) process.env[key] = val;
-    }
-}
-
 async function main() {
-    loadDotEnv();
     const username = (process.env.GARMIN_GLOBAL_USERNAME_2 || process.env.GARMIN_GLOBAL_USERNAME || '').trim();
     const password = (process.env.GARMIN_GLOBAL_PASSWORD_2 || process.env.GARMIN_GLOBAL_PASSWORD || '').trim();
     // 模式二：直接传入已在浏览器会话中铸好的 ServiceTicket（绕开密码登录与 Cloudflare）
@@ -250,20 +242,16 @@ async function main() {
         console.error('❌ OAuth 交换失败:', String(err?.message ?? err));
         process.exit(2);
     }
-    const payload = { sessionUser: username || 'GLOBAL_ACCOUNT2', region: 'GLOBAL', token };
+    const payload = { sessionUser: username, region: 'GLOBAL', token };
 
-    const outDir = './db';
-    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-    const outPath = `${outDir}/global_token.json`;
-    fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
+    fs.mkdirSync(path.dirname(GLOBAL_TOKEN_PATH), { recursive: true });
+    fs.writeFileSync(GLOBAL_TOKEN_PATH, JSON.stringify(payload, null, 2), { mode: 0o600 });
 
     console.log('');
-    console.log(`✅ OAuth token 导出成功，已写入 ${outPath}`);
+    console.log(`✅ OAuth token 导出成功，已写入 ${GLOBAL_TOKEN_PATH}`);
     console.log('');
-    console.log('👉 复制下面这段 JSON，粘贴到 EC2 管理页「导入国际区 Token」输入框：');
-    console.log('----------8<----------');
-    console.log(JSON.stringify(payload));
-    console.log('---------->8----------');
+    console.log('👉 下一步落库（1 或 2 是账号编号）：');
+    console.log('     yarn import:global-token 2');
 }
 
 main().catch((e) => {

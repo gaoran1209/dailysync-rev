@@ -1,28 +1,13 @@
-export const ACCOUNT2_AUTH_STATE_KEY = 'ACCOUNT2';
+import { PLAYWRIGHT_PROFILE_DIR } from '../constant';
+import { ACCOUNT2_AUTH_STATE_KEY, getAccount, requirePassword } from '../accounts';
 
-export interface Account2ServiceConfig {
+export interface Account2AuthConfig {
     accountKey: string;
-    port: number;
-    appBaseUrl: string;
-    secureCookies: boolean;
-    adminSessionCookieName: string;
-    adminSessionTtlMs: number;
     playwrightProfileDir: string;
     playwrightHeadless: boolean;
-    cn: {
-        username: string;
-        password: string;
-    };
-    global: {
-        username: string;
-        password: string;
-    };
-    admin: {
-        username: string;
-        password: string;
-    };
-    webhookToken: string;
-    /** 自动从邮箱读 MFA 验证码的配置；未配置 MAIL_IMAP_PASSWORD 时为 null（回退到管理页人工提交） */
+    cn: { username: string; password: string; sessionUser: string };
+    global: { username: string; password: string; sessionUser: string };
+    /** 自动从邮箱读验证码的配置；没配 MAIL_IMAP_PASSWORD 时为 null，此时只能人工输码 */
     mail: {
         host: string;
         port: number;
@@ -32,15 +17,7 @@ export interface Account2ServiceConfig {
     } | null;
 }
 
-function requireEnv(name: string): string {
-    const value = process.env[name]?.trim();
-    if (!value) {
-        throw new Error(`缺少环境变量 ${name}`);
-    }
-    return value;
-}
-
-function buildMailConfig(): Account2ServiceConfig['mail'] {
+function buildMailConfig(cnUsername: string): Account2AuthConfig['mail'] {
     const password = process.env.MAIL_IMAP_PASSWORD?.trim();
     if (!password) {
         return null;
@@ -50,54 +27,37 @@ function buildMailConfig(): Account2ServiceConfig['mail'] {
         host: process.env.MAIL_IMAP_HOST?.trim() || 'imap.163.com',
         port: Number.isFinite(port) && port > 0 ? port : 993,
         secure: process.env.MAIL_IMAP_SECURE !== 'false',
-        // 默认用国区 Garmin 账号邮箱（即收验证码的邮箱）
-        user: process.env.MAIL_IMAP_USER?.trim() || requireEnv('GARMIN_USERNAME_2'),
+        // 默认用账号2 的国区用户名（它本身就是收验证码的那个 163 邮箱）
+        user: process.env.MAIL_IMAP_USER?.trim() || cnUsername,
         password,
     };
 }
 
-let cachedConfig: Account2ServiceConfig | undefined;
+let cachedConfig: Account2AuthConfig | undefined;
 
-export function getAccount2ServiceConfig(): Account2ServiceConfig {
+/** 这份配置是给「重新登录」用的，所以密码在这里是硬需求，缺了必须当场报错。 */
+export function getAccount2AuthConfig(): Account2AuthConfig {
     if (cachedConfig) {
         return cachedConfig;
     }
-
-    const port = Number(process.env.PORT || '3000');
-    if (!Number.isFinite(port) || port <= 0) {
-        throw new Error('PORT 环境变量无效');
-    }
-
-    const appBaseUrl = process.env.APP_BASE_URL?.trim() || `http://localhost:${port}`;
-    const ttlMinutes = Number(process.env.ADMIN_SESSION_TTL_MINUTES || '720');
-    const adminSessionTtlMs = Number.isFinite(ttlMinutes) && ttlMinutes > 0
-        ? ttlMinutes * 60 * 1000
-        : 12 * 60 * 60 * 1000;
-
-    cachedConfig = {
+    const account = getAccount('2');
+    const config: Account2AuthConfig = {
         accountKey: ACCOUNT2_AUTH_STATE_KEY,
-        port,
-        appBaseUrl,
-        secureCookies: appBaseUrl.startsWith('https://'),
-        adminSessionCookieName: process.env.ADMIN_SESSION_COOKIE_NAME?.trim() || 'dailysync_admin_session',
-        adminSessionTtlMs,
-        playwrightProfileDir: process.env.PLAYWRIGHT_PROFILE_DIR?.trim() || './db/playwright/account2',
-        playwrightHeadless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
+        playwrightProfileDir: PLAYWRIGHT_PROFILE_DIR,
+        // 默认开着浏览器窗口跑：本机重新登录是人工触发的低频操作，看得见更好排查
+        playwrightHeadless: process.env.PLAYWRIGHT_HEADLESS === 'true',
         cn: {
-            username: requireEnv('GARMIN_USERNAME_2'),
-            password: requireEnv('GARMIN_PASSWORD_2'),
+            username: account.sync.cn.username,
+            password: requirePassword(account.sync.cn),
+            sessionUser: account.sync.cn.sessionUser,
         },
         global: {
-            username: requireEnv('GARMIN_GLOBAL_USERNAME_2'),
-            password: requireEnv('GARMIN_GLOBAL_PASSWORD_2'),
+            username: account.sync.global.username,
+            password: account.sync.global.password ?? '-',
+            sessionUser: account.sync.global.sessionUser,
         },
-        admin: {
-            username: requireEnv('ADMIN_USERNAME'),
-            password: requireEnv('ADMIN_PASSWORD'),
-        },
-        webhookToken: requireEnv('ACCOUNT2_SYNC_WEBHOOK_TOKEN'),
-        mail: buildMailConfig(),
+        mail: buildMailConfig(account.sync.cn.username),
     };
-
-    return cachedConfig;
+    cachedConfig = config;
+    return config;
 }
