@@ -77,6 +77,11 @@ wait "$CHILD_PID"
 EXIT_CODE=$?
 log "===== 同步结束，退出码 $EXIT_CODE ====="
 
+# ---- 紧接着做一次健康检查，有问题就立刻推飞书 ----
+# 这是第一层告警：同步刚失败几秒内就能收到。第二层是 openclaw 的定时巡检，
+# 负责兜住「这个脚本压根没被调起来」（Mac 睡了 / launchd 被卸载）这类情况。
+"$NODE_BIN" "$REPO_DIR/scripts/health-check.js" --notify >> "$LOG_FILE" 2>&1 || true
+
 # ---- 日志轮转 ----
 find "$LOG_DIR" -name 'sync-*.log' -type f -mtime "+$LOG_KEEP_DAYS" -delete 2>/dev/null
 

@@ -42,7 +42,7 @@ launchd (0/6/12/18 点)
   社区实证限流按「账号 + clientId」计，换 IP 没用，反复重试会升级成账号级封锁 48-72 小时。
 - 账号2 国区开了 ECG，密码登录必然触发验证码邮件，无人值守时只会白发邮件。
 
-所以 token 真失效时，程序只做一件事：抛 `REAUTH_REQUIRED` + 发 Bark 推送，然后停下来
+所以 token 真失效时，程序只做一件事：抛 `REAUTH_REQUIRED` + 推飞书告警，然后停下来
 等人跑对应的 relogin 命令。
 
 ## 目录约定
@@ -75,9 +75,33 @@ cp .env.example .env               # 填账号信息，见文件内注释
 bash scripts/install-launchd.sh    # 装定时任务
 ```
 
+## 出问题怎么知道
+
+告警走 openclaw 的飞书机器人，分两层：
+
+1. **同步失败时秒级推送** —— [scripts/run-sync.sh](scripts/run-sync.sh) 每次跑完立刻调一次
+   [scripts/health-check.js](scripts/health-check.js)，有问题当场推卡片。
+2. **每 30 分钟兜底巡检** —— openclaw cron job「佳明同步健康巡检」（`25,55 * * * *`），
+   负责抓第一层发现不了的情况：Mac 睡了、launchd 被卸载、脚本压根没被调起来。
+
+检查项：定时任务是否还在、退出码、超过 7 小时没同步、任一账号 `reauth_required`/`failed`/
+`partial`、以及连续 3 次 `skipped`（说明「瞬时错误」其实已经不瞬时了）。
+
+推送做了去重：同一个问题只推一次，持续 6 小时才再提醒；问题消失时推一条恢复通知；
+一切正常时完全静默。手动查看：
+
+```bash
+node scripts/health-check.js          # 退出码 0=健康 1=有问题
+node scripts/health-check.js --json
+```
+
+> `lark-cli` 需要 `OPENCLAW_HOME=/Users/r/.openclaw` 才能找到 openclaw 那套飞书凭据，
+> 脚本里已经默认带上了。不设的话它会退回到另一个没登录的 app 并报
+> 「set valid app_id and app_secret」。
+
 ## 日常维护：基本不需要
 
-正常情况全自动。出问题会收到 Bark 推送，按推送内容对号入座：
+正常情况全自动。出问题会收到飞书推送，按推送内容对号入座：
 
 ### ① 国区 token 失效
 
@@ -139,7 +163,7 @@ src/
 └─ utils/
    ├─ garmin_cn.ts             国区客户端 + 同步主逻辑（指纹差集）
    ├─ garmin_global.ts         国际区客户端（只消费 token）
-   ├─ garmin_common.ts         下载/上传/错误分类/Bark/token 持久化
+   ├─ garmin_common.ts         下载/上传/错误分类/推送/token 持久化
    └─ sqlite.ts                session 加密存取
 scripts/
 ├─ run-sync.sh                 launchd 包装：互斥锁、超时、日志
