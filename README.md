@@ -95,9 +95,10 @@ node scripts/health-check.js          # 退出码 0=健康 1=有问题
 node scripts/health-check.js --json
 ```
 
-> `lark-cli` 需要 `OPENCLAW_HOME=/Users/r/.openclaw` 才能找到 openclaw 那套飞书凭据，
-> 脚本里已经默认带上了。不设的话它会退回到另一个没登录的 app 并报
-> 「set valid app_id and app_secret」。
+> 推送用的是 `~/.lark-cli/hermes/config.json` 里的飞书凭据（Mini 酱）。`lark-cli` 靠
+> `HERMES_HOME` 这个环境变量名选中该工作区，脚本里已经默认带上了，并且会主动清掉
+> 调用方环境里可能残留的 `OPENCLAW_HOME`——它优先级更高，会劫持回已退役的 openclaw 配置。
+> 两个变量都不设时，`lark-cli` 退回到另一个没登录的 app 并报「set valid app_id and app_secret」。
 
 ## 日常维护：基本不需要
 

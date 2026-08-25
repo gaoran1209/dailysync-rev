@@ -206,12 +206,24 @@ function buildCard(status) {
     };
 }
 
+// lark-cli 按环境变量选配置工作区：
+//   HERMES_HOME   -> ~/.lark-cli/hermes/config.json
+//   OPENCLAW_HOME -> ~/.lark-cli/openclaw/config.json   （两者都设时它优先）
+//   都不设         -> ~/.lark-cli/config.json（那个没登录的 app，会报
+//                     「set valid app_id and app_secret」）
+// 变量只需存在，指向的目录不必真实存在。
+// 这里显式选 hermes 工作区（已绑 Mini 酱），并清掉调用方环境里可能残留的
+// OPENCLAW_HOME——否则它会把我们劫持回已退役的 openclaw 配置。
+function larkCliEnv() {
+    const env = { ...process.env };
+    delete env.OPENCLAW_HOME;
+    env.HERMES_HOME = process.env.HERMES_HOME || path.join(os.homedir(), '.hermes');
+    return env;
+}
+
 function pushFeishu(card) {
     const content = JSON.stringify(card);
     try {
-        // OPENCLAW_HOME 决定 lark-cli 用哪套凭据。不设的话它会退回到 ~/.lark-cli 里
-        // 那个没登录的 app，报「set valid app_id and app_secret」——从 openclaw 的
-        // agent 里跑不会踩到，因为 gateway 会注入这个变量；但 cron/命令行必须自己带上。
         const out = execFileSync(LARK_CLI, [
             'im', '+messages-send',
             '--as', 'bot',
@@ -222,7 +234,7 @@ function pushFeishu(card) {
             encoding: 'utf8',
             timeout: 60000,
             stdio: ['ignore', 'pipe', 'pipe'],
-            env: { ...process.env, OPENCLAW_HOME: process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw') },
+            env: larkCliEnv(),
         });
         // lark-cli 失败时也可能返回 0，得看输出里的 code
         try {
