@@ -56,6 +56,16 @@ export function isAuthFailure(err: any): boolean {
     return false;
 }
 
+/** 取一次 profile 并确认它真的带身份字段。token 失效时佳明有时不回 401，而是回一个空壳。 */
+async function getVerifiedProfile(client: GarminClientType, label: string): Promise<Record<string, any>> {
+    const userInfo = await client.getUserProfile();
+    // 上游就是靠这个判断的，别把它简化掉。
+    if (!userInfo || (!userInfo.fullName && !userInfo.userName && !userInfo.displayName)) {
+        throw new Error(`${label} 登录校验失败：getUserProfile 没有返回身份信息（invalid_token）`);
+    }
+    return userInfo;
+}
+
 /**
  * 校验当前 token 是否可用，对瞬时错误做有限重试。
  * @throws isAuthFailure=true 的错误（认证失效，不重试），或最后一次瞬时错误
@@ -68,13 +78,7 @@ export async function verifyProfileWithRetry(
     let lastErr: any;
     for (let i = 0; i < attempts; i++) {
         try {
-            const userInfo = await client.getUserProfile();
-            // token 失效时佳明有时不是回 401，而是回一个没有身份字段的壳。
-            // 上游就是靠这个判断的，别把它简化掉。
-            if (!userInfo || (!userInfo.fullName && !userInfo.userName && !userInfo.displayName)) {
-                throw new Error(`${label} 登录校验失败：getUserProfile 没有返回身份信息（invalid_token）`);
-            }
-            return userInfo;
+            return await getVerifiedProfile(client, label);
         } catch (err) {
             lastErr = err;
             if (isAuthFailure(err)) {
@@ -90,12 +94,69 @@ export async function verifyProfileWithRetry(
     throw lastErr;
 }
 
+/**
+ * 同步路径专用的登录态校验：每一轮都用**全新的客户端**重试，认证失败也重试。
+ *
+ * 为什么不能在同一个 client 上重试：库的 exchange() 会在发出换票请求**之前**就把
+ * this.oauth2Token 置空（HttpClient.js）。那次 POST 只要失败——401 也好、网络抖动
+ * 也好——客户端就永久停在「没有 oauth2Token」的状态；此后任何请求收到 401，都会在
+ * handleResponseError 里撞上 `if (!this.oauth2Token) throw new Error('No OAuth2 token
+ * available')`，连刷新都不再尝试。而 'No OAuth2 token available' 正是 isAuthFailure
+ * 认定的「token 死了」。
+ *
+ * 结果就是：换票时的一次网络抖动，会在紧接着的重试里被伪装成认证失效。国区那条路径
+ * 认定失效是要删 session 的（账号2 重建要走邮箱验证码），代价远大于多试两次。
+ *
+ * 所以这里每一轮都从库里的 oauth1/oauth2 重新 loadToken 一个干净客户端；认证被拒也
+ * 照样重试，只有连着 attempts 次都被拒，才把「token 真的失效了」这个结论交给调用方。
+ * 重试打的是 OAuth 换票接口，不是 Cloudflare 后面的 signin 页，也不涉及密码登录。
+ */
+export async function verifyProfileWithFreshClient(
+    buildClient: () => GarminClientType,
+    label: string,
+    attempts = 3,
+): Promise<{ client: GarminClientType; userInfo: Record<string, any> }> {
+    let lastErr: any;
+    for (let i = 0; i < attempts; i++) {
+        const client = buildClient();
+        try {
+            const userInfo = await getVerifiedProfile(client, label);
+            return { client, userInfo };
+        } catch (err: any) {
+            lastErr = err;
+            if (i < attempts - 1) {
+                const backoffMs = 3000 * (i + 1);
+                const kind = isAuthFailure(err) ? '认证被拒' : '瞬时错误';
+                console.log(`[${label}] 第 ${i + 1} 次校验失败（${kind}：${err?.message}），${backoffMs}ms 后换一个全新客户端重试...`);
+                await new Promise(r => setTimeout(r, backoffMs));
+            }
+        }
+    }
+    throw lastErr;
+}
+
 export function createReauthRequiredError(region: 'CN' | 'GLOBAL', account: string, hint: string): Error {
     return new Error(`REAUTH_REQUIRED: ${account} 的佳明${region === 'CN' ? '国区' : '国际区'}登录态已失效，${hint}`);
 }
 
 export function createTransientError(label: string, cause: string): Error {
     return new Error(`TRANSIENT_ERROR: ${label} 暂时不可用（${cause}），本次跳过，保留登录态`);
+}
+
+/**
+ * 判断错误是不是「库压平过的网络层错误」。
+ *
+ * @gooin/garmin-connect 的 HttpClient.handleResponseError 在拿不到 HTTP 响应时，会把
+ * 原始异常整个丢掉、重新抛一个没有 code / response 的 `Error('Network error or unknown
+ * error occurred')`；超时则是 `Request Timeout: > 30000 ms`。ECONNRESET / ETIMEDOUT
+ * 这些线索到不了我们手里，isAuthFailure 也就无从判断。
+ *
+ * 但这类错误按定义就不可能是认证问题——认证失效一定带着 401 响应，会走
+ * handleHttpError 或 'No OAuth2 token available' 那条路。所以认出这两句话就够了。
+ */
+export function isTransientNetworkMessage(message: string): boolean {
+    return message.includes('Network error or unknown error occurred')
+        || message.includes('Request Timeout');
 }
 
 /** 刷新并保存 Token 到数据库。每次成功调用 API 后都调一次，让滚动刷新的 OAuth2 落库。 */

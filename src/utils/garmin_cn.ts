@@ -8,6 +8,7 @@ import {
     refreshAndSaveToken,
     sendBarkNotification,
     uploadGarminActivity,
+    verifyProfileWithFreshClient,
     verifyProfileWithRetry,
 } from './garmin_common';
 import { getGaminGlobalClient } from './garmin_global';
@@ -53,10 +54,12 @@ export const getGaminCNClient = async (config: GarminLoginOptions): Promise<Garm
         throw createReauthRequiredError('CN', config.label, `库里没有 token，${RELOGIN_HINT(config)}`);
     }
 
-    const client = newCnClient(config);
-    client.loadToken(currentSession.oauth1, currentSession.oauth2);
     try {
-        const userInfo = await verifyProfileWithRetry(client, config.label);
+        const { client, userInfo } = await verifyProfileWithFreshClient(() => {
+            const fresh = newCnClient(config);
+            fresh.loadToken(currentSession.oauth1, currentSession.oauth2);
+            return fresh;
+        }, `${config.label} 国区`);
         console.log(`[${config.label}] 国区登录态有效:`, { fullName: userInfo?.fullName });
         await refreshAndSaveToken(client, 'CN', config.sessionUser);
         if (config.authStateKey) {
@@ -64,7 +67,8 @@ export const getGaminCNClient = async (config: GarminLoginOptions): Promise<Garm
         }
         return client;
     } catch (err: any) {
-        // 只有确凿的认证失效才动长效 OAuth1；网络抖动/5xx/超时一律保留登录态跳过本次
+        // 只有确凿的认证失效才动长效 OAuth1；网络抖动/5xx/超时一律保留登录态跳过本次。
+        // 走到这里说明连着几个全新客户端都被拒，不是单次抖动。
         if (!isAuthFailure(err)) {
             throw createTransientError(`${config.label} 国区`, err?.message ?? '未知网络错误');
         }

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# 安装/更新定时任务（每天 0/6/12/18 点，本地时间）。
+# 安装/更新定时任务（北京时间每天 3 次：10:20 / 14:20 / 22:00）。
 #   scripts/install-launchd.sh            安装或更新
 #   scripts/install-launchd.sh uninstall  卸载
 #
@@ -42,10 +42,9 @@ cat > "$PLIST" <<PLISTEOF
 
     <key>StartCalendarInterval</key>
     <array>
-        <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>20</integer></dict>
-        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>20</integer></dict>
-        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>20</integer></dict>
-        <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>20</integer></dict>
+        <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>20</integer></dict>
+        <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>20</integer></dict>
+        <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>0</integer></dict>
     </array>
 
     <key>RunAtLoad</key>

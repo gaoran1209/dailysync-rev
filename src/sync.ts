@@ -16,7 +16,7 @@ loadDotEnv();
 // 下面这些模块在 import 期就会读环境变量，必须放在 loadDotEnv() 之后延迟加载
 const { getAccount } = require('./accounts') as typeof import('./accounts');
 const { syncGarminCN2GarminGlobal } = require('./utils/garmin_cn') as typeof import('./utils/garmin_cn');
-const { sendBarkNotification } = require('./utils/garmin_common') as typeof import('./utils/garmin_common');
+const { sendBarkNotification, isTransientNetworkMessage } = require('./utils/garmin_common') as typeof import('./utils/garmin_common');
 const { closeDB } = require('./utils/sqlite') as typeof import('./utils/sqlite');
 
 type AccountId = '1' | '2';
@@ -49,8 +49,13 @@ async function runOne(id: AccountId): Promise<RunOutcome> {
     } catch (err: any) {
         const message = String(err?.message ?? err);
 
-        // 网络抖动/佳明 5xx：登录态仍然有效，本次跳过即可，不告警
-        if (message.includes('TRANSIENT_ERROR')) {
+        // 网络抖动/佳明 5xx：登录态仍然有效，本次跳过即可，不告警。
+        //
+        // TRANSIENT_ERROR 是取客户端那一步（校验登录态）自己包装好的。取到客户端之后的
+        // 活动列表 / 下载 / 上传阶段没有这层包装，库又把网络错误压成了一句没有 code 的
+        // 白话，所以这里要补一次识别——否则一次普通的连接重置会被报成 critical 的
+        // 「同步失败」，还让 launchd 退出码变成 1，而下一轮它自己就好了。
+        if (message.includes('TRANSIENT_ERROR') || isTransientNetworkMessage(message)) {
             console.log(`[${label}] 瞬时错误，本次跳过: ${message}`);
             return { account: id, status: 'skipped', uploadedCount: 0, message };
         }

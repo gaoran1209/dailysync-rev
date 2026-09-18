@@ -24,8 +24,8 @@ const LABEL = 'xyz.gaoran.dailysync';
 const LARK_CLI = process.env.LARK_CLI || '/opt/homebrew/bin/lark-cli';
 const FEISHU_USER_ID = process.env.DAILYSYNC_FEISHU_USER_ID || 'ou_cd7b184679d89c65938191f7c824277d';
 
-/** 同步每 6 小时一次；超过这个时长没有成功运行就算「停摆」 */
-const STALE_HOURS = Number(process.env.DAILYSYNC_STALE_HOURS || 7);
+/** 同步每天 3 次（10:20 / 14:20 / 22:00）；最长间隔约 12.3h（22:00→次日 10:20）。超过这个时长没有成功运行就算「停摆」 */
+const STALE_HOURS = Number(process.env.DAILYSYNC_STALE_HOURS || 14);
 /** 同一个问题持续多久后再提醒一次 */
 const RENOTIFY_HOURS = Number(process.env.DAILYSYNC_RENOTIFY_HOURS || 6);
 
@@ -108,7 +108,7 @@ function check() {
             level: 'critical',
             key: 'stale',
             title: `已经 ${hoursSince.toFixed(1)} 小时没同步`,
-            detail: `正常每 6 小时一次。最后一次是 ${new Date(lastAt).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })}。Mac 可能睡了、关机了，或定时任务被卸载。`,
+            detail: `正常每天 3 次（10:20 / 14:20 / 22:00）。最后一次是 ${new Date(lastAt).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })}。Mac 可能睡了、关机了，或定时任务被卸载。`,
         });
     }
 
@@ -218,6 +218,13 @@ function larkCliEnv() {
     const env = { ...process.env };
     delete env.OPENCLAW_HOME;
     env.HERMES_HOME = process.env.HERMES_HOME || path.join(os.homedir(), '.hermes');
+    // lark-cli 的 shebang 是 #!/usr/bin/env node，而 launchd 给的 PATH 只有
+    // /usr/bin:/bin:/usr/sbin:/sbin，这几个目录里没有 node —— 推送会在还没发出请求时
+    // 就死在「env: node: No such file or directory」。run-sync.sh 是用绝对路径调起
+    // 本脚本的，所以进程自己跑得好好的，只有这一步是哑的。
+    // 把当前解释器所在目录补进 PATH，让 lark-cli 的 shebang 能解析到同一个 node。
+    const nodeDir = path.dirname(process.execPath);
+    env.PATH = [nodeDir, env.PATH].filter(Boolean).join(path.delimiter);
     return env;
 }
 

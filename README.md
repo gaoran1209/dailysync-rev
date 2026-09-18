@@ -3,7 +3,7 @@
 自用项目：把**两个使用者的佳明国区账号**的运动活动，定时自动同步到各自的国际区账号。
 Fork 自 [gooin/dailysync-rev](https://github.com/gooin/dailysync-rev)。
 
-**跑在自己的 Mac mini 上**（launchd 每 6 小时一次），不依赖任何云服务器，也不依赖
+**跑在自己的 Mac mini 上**（launchd 每天 3 次：10:20 / 14:20 / 22:00），不依赖任何云服务器，也不依赖
 GitHub Actions。之前的 EC2 常驻服务已经退役。
 
 ## 总览
@@ -11,7 +11,7 @@ GitHub Actions。之前的 EC2 常驻服务已经退役。
 | | 账号1 | 账号2 |
 |---|---|---|
 | 特点 | 无 MFA | **开了 ECG**，国区登录强制邮箱验证码 |
-| 定时同步 | 本机 launchd，每 6 小时 | 同左（同一个进程里顺序跑） |
+| 定时同步 | 本机 launchd，每天 3 次（10:20 / 14:20 / 22:00） | 同左（同一个进程里顺序跑） |
 | 国区 token 失效时 | `yarn relogin:cn 1`（账号密码直接登录） | `yarn relogin:account2`（浏览器登录 + 163 邮箱自动取码） |
 | 国际区 token 失效时 | 浏览器铸票 → `yarn import:global-token 1` | 同左，编号换成 2 |
 | 预计人工介入频率 | 一年 1~2 次 | 一年 1~2 次 |
@@ -19,7 +19,7 @@ GitHub Actions。之前的 EC2 常驻服务已经退役。
 ## 它是怎么工作的
 
 ```
-launchd (0/6/12/18 点)
+launchd (10:20 / 14:20 / 22:00)
   └─ scripts/run-sync.sh          互斥锁 + 硬超时 + 日志轮转
        └─ node dist/sync.js       账号1、账号2 顺序跑，互不影响
             ├─ 读 ~/.dailysync/garmin.db 里加密的 OAuth token

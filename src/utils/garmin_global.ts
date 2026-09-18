@@ -5,7 +5,7 @@ import {
     isAuthFailure,
     refreshAndSaveToken,
     sendBarkNotification,
-    verifyProfileWithRetry,
+    verifyProfileWithFreshClient,
 } from './garmin_common';
 import { GarminClientType, GarminLoginOptions } from './type';
 import { getSessionFromDB, initDB } from './sqlite';
@@ -33,16 +33,17 @@ export const getGaminGlobalClient = async (config: GarminLoginOptions): Promise<
         throw createReauthRequiredError('GLOBAL', config.label, `库里没有国际区 token，${REMINT_HINT}`);
     }
 
-    const client: GarminClientType = new GarminConnect({
-        username: config.username,
-        // 库的构造函数不接受空密码；这里永远不会真的用它去登录
-        password: config.password || '-',
-        timeout: HTTP_TIMEOUT_MS,
-    });
-    client.loadToken(currentSession.oauth1, currentSession.oauth2);
-
     try {
-        const userInfo = await verifyProfileWithRetry(client, config.label);
+        const { client, userInfo } = await verifyProfileWithFreshClient(() => {
+            const fresh: GarminClientType = new GarminConnect({
+                username: config.username,
+                // 库的构造函数不接受空密码；这里永远不会真的用它去登录
+                password: config.password || '-',
+                timeout: HTTP_TIMEOUT_MS,
+            });
+            fresh.loadToken(currentSession.oauth1, currentSession.oauth2);
+            return fresh;
+        }, `${config.label} 国际区`);
         console.log(`[${config.label}] 国际区登录态有效:`, { fullName: userInfo?.fullName });
         await refreshAndSaveToken(client, 'GLOBAL', config.sessionUser);
         return client;
@@ -50,7 +51,7 @@ export const getGaminGlobalClient = async (config: GarminLoginOptions): Promise<
         if (!isAuthFailure(err)) {
             throw createTransientError(`${config.label} 国际区`, err?.message ?? '未知网络错误');
         }
-        // 长效 OAuth1 真的死了。刻意不删这一行、更不去密码登录。
+        // 连着几个全新客户端都被拒，长效 OAuth1 是真的死了。刻意不删这一行、更不去密码登录。
         await sendBarkNotification(
             `${config.label} 国际区 token 已失效`,
             '需要重新铸票并导入，同步已暂停',
