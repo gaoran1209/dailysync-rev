@@ -7,7 +7,7 @@
  *   node scripts/health-check.js --notify   # 有问题时推飞书；恢复时也推一条
  *
  * 设计原则：监控本身必须是确定性的，不依赖 LLM，也不依赖网络（除了推送那一步）。
- * 判断依据全部来自 launchd 状态和本地日志，跑得飞快。
+ * 判断依据全部来自本机：launchd 状态、本地日志、重新登录要用的浏览器文件，跑得飞快。
  *
  * 去重：同一个问题不会每 30 分钟轰炸一次。只有「问题指纹变化」或「同一问题持续
  * 满 6 小时」才会再推一次；问题消失时推一条恢复通知。
@@ -16,6 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { chromium } = require('playwright');
 
 const DATA_DIR = process.env.DAILYSYNC_DATA_DIR || path.join(os.homedir(), '.dailysync');
 const LOG_DIR = path.join(DATA_DIR, 'logs');
@@ -154,6 +155,22 @@ function check() {
         }
     }
 
+    // 5) 账号2 重新登录要用的浏览器还在不在。Playwright 把浏览器放在全机共享的
+    //    ~/Library/Caches/ms-playwright，任何项目安装 Playwright 时都会清理掉没有项目登记
+    //    在用的版本；本项目的登记跟仓库路径绑定，挪过仓库就会失效。提前发现，免得国区
+    //    token 失效、真要重新登录时才撞上。
+    const browser = chromium.executablePath();
+    if (!fs.existsSync(browser)) {
+        problems.push({
+            level: 'warn',
+            key: 'relogin-browser-missing',
+            title: '账号2 重新登录用的浏览器不见了',
+            detail: `${browser} 不存在，国区 token 失效时 relogin:account2 会直接失败。`
+                + '\n\n修复：cd ~/Developer/dailysync-rev && corepack yarn install'
+                + '（会重新下载浏览器并登记本项目在用），再跑 corepack yarn relogin:check 确认。',
+        });
+    }
+
     return {
         healthy: problems.length === 0,
         checkedAt: new Date().toISOString(),
@@ -199,6 +216,7 @@ function buildCard(status) {
                     + 'tail -50 ~/.dailysync/logs/sync-$(date +%F).log   # 看日志\n'
                     + 'corepack yarn sync                                # 手动跑一次\n'
                     + 'corepack yarn relogin:cn 1                        # 账号1 重新登录\n'
+                    + 'corepack yarn relogin:check                       # 账号2 重新登录预检，不发验证码\n'
                     + 'corepack yarn relogin:account2                    # 账号2 重新登录\n```',
             },
             { tag: 'markdown', content: `<font color='grey'>🍮 Mini 酱 · 佳明同步监控 · ${now}</font>` },
@@ -206,18 +224,12 @@ function buildCard(status) {
     };
 }
 
-// lark-cli 按环境变量选配置工作区：
-//   HERMES_HOME   -> ~/.lark-cli/hermes/config.json
-//   OPENCLAW_HOME -> ~/.lark-cli/openclaw/config.json   （两者都设时它优先）
-//   都不设         -> ~/.lark-cli/config.json（那个没登录的 app，会报
-//                     「set valid app_id and app_secret」）
-// 变量只需存在，指向的目录不必真实存在。
-// 这里显式选 hermes 工作区（已绑 Mini 酱），并清掉调用方环境里可能残留的
-// OPENCLAW_HOME——否则它会把我们劫持回已退役的 openclaw 配置。
+// lark-cli 按环境变量选配置工作区：设了 HERMES_HOME 就用 ~/.lark-cli/hermes/config.json
+// （已绑飞书机器人 Mini 酱；变量只需存在，指向的目录不必真实存在）。不设时它退回
+// ~/.lark-cli/config.json 里那个没登录的 app，报「set valid app_id and app_secret」。
 function larkCliEnv() {
     const env = { ...process.env };
-    delete env.OPENCLAW_HOME;
-    env.HERMES_HOME = process.env.HERMES_HOME || path.join(os.homedir(), '.hermes');
+    env.HERMES_HOME = env.HERMES_HOME || path.join(os.homedir(), '.hermes');
     // lark-cli 的 shebang 是 #!/usr/bin/env node，而 launchd 给的 PATH 只有
     // /usr/bin:/bin:/usr/sbin:/sbin，这几个目录里没有 node —— 推送会在还没发出请求时
     // 就死在「env: node: No such file or directory」。run-sync.sh 是用绝对路径调起

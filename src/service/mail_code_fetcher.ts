@@ -66,11 +66,8 @@ function extractCodeFromText(text: string | undefined | null): string | null {
     return null;
 }
 
-/**
- * 单次连接邮箱，查找 sinceMs 之后 Garmin 发来的验证码邮件
- */
-async function fetchCodeOnce(config: MailFetcherConfig, sinceMs: number): Promise<string | null> {
-    const client = new ImapFlow({
+function createClient(config: MailFetcherConfig) {
+    return new ImapFlow({
         host: config.host,
         port: config.port,
         secure: config.secure,
@@ -86,7 +83,27 @@ async function fetchCodeOnce(config: MailFetcherConfig, sinceMs: number): Promis
             vendor: 'dailysync',
         },
     });
+}
 
+/**
+ * 重新登录的预检：登录邮箱并以只读方式打开收件箱，确认 IMAP 授权码有效。
+ * 不读取任何邮件内容。
+ */
+export async function checkMailbox(config: MailFetcherConfig): Promise<void> {
+    const client = createClient(config);
+    await client.connect();
+    try {
+        await client.mailboxOpen('INBOX', { readOnly: true });
+    } finally {
+        await client.logout().catch(() => undefined);
+    }
+}
+
+/**
+ * 单次连接邮箱，查找 sinceMs 之后 Garmin 发来的验证码邮件
+ */
+async function fetchCodeOnce(config: MailFetcherConfig, sinceMs: number): Promise<string | null> {
+    const client = createClient(config);
     await client.connect();
     try {
         const lock = await client.getMailboxLock('INBOX');

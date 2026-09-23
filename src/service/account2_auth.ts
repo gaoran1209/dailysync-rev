@@ -1,5 +1,5 @@
-import { chromium, type BrowserContext, type Page } from 'playwright';
-import { exchangeAndSaveToken, extractTicket } from '../mfa/garmin_sso_mfa';
+import { chromium, type BrowserContext, type Locator, type Page } from 'playwright';
+import { exchangeAndSaveToken, extractTicket, getGarminCnSigninUrl } from '../mfa/garmin_sso_mfa';
 import { getGaminCNClient } from '../utils/garmin_cn';
 import { sendBarkNotification } from '../utils/garmin_common';
 import { fetchGarminMfaCode } from './mail_code_fetcher';
@@ -40,6 +40,20 @@ interface PendingLoginState {
 function sanitizeMessage(message: string): string {
     return message.replace(/\s+/g, ' ').trim().slice(0, 240);
 }
+
+const CN_USERNAME_SELECTORS = [
+    'input[name="username"]',
+    'input#username',
+    'input[type="email"]',
+    'input[autocomplete="username"]',
+];
+
+const CN_PASSWORD_SELECTORS = [
+    'input[name="password"]',
+    'input#password',
+    'input[type="password"]',
+    'input[autocomplete="current-password"]',
+];
 
 export class Account2AuthService {
     private readonly config = getAccount2AuthConfig();
@@ -122,6 +136,17 @@ export class Account2AuthService {
         await contextPromise.then(ctx => ctx.close()).catch(() => undefined);
     }
 
+    /**
+     * 重新登录的预检：用同一套浏览器配置打开国区登录页，确认账号、密码两个输入框都在。
+     * 只看页面，不填写也不提交，所以不会触发验证码邮件。返回页面标题。
+     */
+    async checkLoginPage(): Promise<string> {
+        const page = await this.openSigninPage();
+        await this.findFirstVisible(page, CN_USERNAME_SELECTORS);
+        await this.findFirstVisible(page, CN_PASSWORD_SELECTORS);
+        return await page.title();
+    }
+
     async getStatus(): Promise<Account2StatusSnapshot> {
         await initDB();
         const state = await getAccountAuthState(this.config.accountKey);
@@ -174,26 +199,9 @@ export class Account2AuthService {
     // 内部使用：由 autoLogin() 调用发起国区登录（Playwright 提交账号密码）
     private async startLogin(): Promise<Account2ActionResponse> {
         try {
-            const page = await this.openFreshPage();
-            // 用与 @gooin/garmin-connect 库一致的参数，确保 ticket 的 service 匹配 OAuth exchange 的 login-url
-            const ssoEmbed = 'https://sso.garmin.cn/sso/embed';
-            const signinUrl = `https://sso.garmin.cn/sso/signin?clientId=GarminConnect&locale=en&id=gauth-widget&embedWidget=true&gauthHost=${encodeURIComponent(ssoEmbed)}&service=${encodeURIComponent(ssoEmbed)}&source=${encodeURIComponent(ssoEmbed)}&redirectAfterAccountLoginUrl=${encodeURIComponent(ssoEmbed)}&redirectAfterAccountCreationUrl=${encodeURIComponent(ssoEmbed)}`;
-            await page.goto(signinUrl, {
-                waitUntil: 'domcontentloaded',
-                timeout: 60_000,
-            });
-            await this.fillFirstVisible(page, [
-                'input[name="username"]',
-                'input#username',
-                'input[type="email"]',
-                'input[autocomplete="username"]',
-            ], this.config.cn.username);
-            await this.fillFirstVisible(page, [
-                'input[name="password"]',
-                'input#password',
-                'input[type="password"]',
-                'input[autocomplete="current-password"]',
-            ], this.config.cn.password);
+            const page = await this.openSigninPage();
+            await this.fillFirstVisible(page, CN_USERNAME_SELECTORS, this.config.cn.username);
+            await this.fillFirstVisible(page, CN_PASSWORD_SELECTORS, this.config.cn.password);
             await this.submitForm(page);
 
             const directTicket = await this.extractTicketFromPage(page);
@@ -323,6 +331,16 @@ export class Account2AuthService {
         return await context.newPage();
     }
 
+    /** 新开页面并打开国区登录页（URL 参数与库一致，ticket 的 service 才能匹配 OAuth 换票） */
+    private async openSigninPage(): Promise<Page> {
+        const page = await this.openFreshPage();
+        await page.goto(getGarminCnSigninUrl(), {
+            waitUntil: 'domcontentloaded',
+            timeout: 60_000,
+        });
+        return page;
+    }
+
     private async disposePendingPage() {
         if (this.pendingLogin?.page && !this.pendingLogin.page.isClosed()) {
             await this.pendingLogin.page.close().catch(() => undefined);
@@ -330,7 +348,7 @@ export class Account2AuthService {
         this.pendingLogin = null;
     }
 
-    private async fillFirstVisible(page: Page, selectors: string[], value: string) {
+    private async findFirstVisible(page: Page, selectors: string[]): Promise<Locator> {
         for (const selector of selectors) {
             const locator = page.locator(selector).first();
             const count = await locator.count().catch(() => 0);
@@ -341,10 +359,14 @@ export class Account2AuthService {
             if (!visible) {
                 continue;
             }
-            await locator.fill(value);
-            return;
+            return locator;
         }
         throw new Error(`未找到可填写的输入框: ${selectors.join(', ')}`);
+    }
+
+    private async fillFirstVisible(page: Page, selectors: string[], value: string) {
+        const locator = await this.findFirstVisible(page, selectors);
+        await locator.fill(value);
     }
 
     private async clickFirstVisible(page: Page, selectors: string[]) {

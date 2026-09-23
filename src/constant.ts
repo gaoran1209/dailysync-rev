@@ -11,8 +11,9 @@ import * as path from 'path';
  *   - logs/              launchd 定时任务的日志
  *   - global_token.json  国际区铸票的中间产物
  *
- * 这样 token 在物理上就不可能被 git 提交，也避开了仓库所在的 iCloud 同步目录
- * （iCloud 会对 sqlite WAL 和 Chromium profile 做逐字节同步与逐出）。
+ * 这样 token 在物理上就不可能被 git 提交。仓库和这个目录都不要放进 iCloud 云盘：
+ * launchd 启动的进程没有权限读取 iCloud 云盘，iCloud 还会对 sqlite WAL 和
+ * Chromium profile 做逐字节同步与逐出。
  */
 export const DATA_DIR = process.env.DAILYSYNC_DATA_DIR?.trim() || path.join(os.homedir(), '.dailysync');
 

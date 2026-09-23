@@ -58,8 +58,9 @@ launchd (10:20 / 14:20 / 22:00)
 └── global_token.json      国际区铸票的中间产物
 ```
 
-这样 token 在物理上就不可能被 git 提交，也避开了仓库所在的 iCloud 同步目录
-（iCloud 会对 sqlite WAL 和 Chromium profile 做逐字节同步和逐出，两者都不安全）。
+这样 token 在物理上就不可能被 git 提交。仓库和这个目录都不要放进 iCloud 云盘：launchd
+启动的进程没有权限读取 iCloud 云盘（报 `Operation not permitted`），iCloud 还会对 sqlite WAL
+和 Chromium profile 做逐字节同步和逐出，两者都不安全。
 
 想换位置就设 `DAILYSYNC_DATA_DIR`。
 
@@ -67,25 +68,34 @@ launchd (10:20 / 14:20 / 22:00)
 
 ```bash
 corepack enable                    # 本机 yarn 不在 PATH，用 corepack
-corepack yarn install
-npx playwright install chromium    # 账号2 重新登录时才用得到，先装好
+corepack yarn install              # 顺带下载账号2 重新登录要用的 Playwright 浏览器
 corepack yarn build
 
 cp .env.example .env               # 填账号信息，见文件内注释
 bash scripts/install-launchd.sh    # 装定时任务
 ```
 
+仓库换位置之后，要在新位置重新跑一遍 `corepack yarn install` 和
+`bash scripts/install-launchd.sh`：前者重新登记 Playwright 浏览器（原因见「踩坑记录」），
+后者把定时任务指向新路径。
+
 ## 出问题怎么知道
 
-告警走 openclaw 的飞书机器人，分两层：
+告警由飞书机器人 Mini 酱推送，分两层：
 
 1. **同步失败时秒级推送** —— [scripts/run-sync.sh](scripts/run-sync.sh) 每次跑完立刻调一次
    [scripts/health-check.js](scripts/health-check.js)，有问题当场推卡片。
-2. **每 30 分钟兜底巡检** —— openclaw cron job「佳明同步健康巡检」（`25,55 * * * *`），
-   负责抓第一层发现不了的情况：Mac 睡了、launchd 被卸载、脚本压根没被调起来。
+2. **每 30 分钟兜底巡检** —— Hermes 定时任务「佳明同步健康巡检」（ID `09247ae7257a`，
+   `25,55 * * * *`，不经过模型，直接运行 `~/.hermes/scripts/garmin_health_check.sh`，也就是
+   `health-check.js --notify`），负责抓第一层发现不了的情况：Mac 睡了、launchd 被卸载、
+   脚本压根没被调起来。
 
-检查项：定时任务是否还在、退出码、超过 7 小时没同步、任一账号 `reauth_required`/`failed`/
-`partial`、以及连续 3 次 `skipped`（说明「瞬时错误」其实已经不瞬时了）。
+Hermes 定时任务「每日简报推送」（ID `18499cd6fa9c`，每天 08:00）会运行 `sync-report.js` 和
+`health-check.js`，把近 24 小时的同步条数和服务状态写进简报的运动模块。
+
+检查项：定时任务是否还在、退出码、超过 14 小时没同步（每天 3 次，最长间隔约 12.3 小时）、
+任一账号 `reauth_required`/`failed`/`partial`、连续 3 次 `skipped`（说明「瞬时错误」其实已经
+不瞬时了），以及账号2 重新登录要用的 Playwright 浏览器还在不在。
 
 推送做了去重：同一个问题只推一次，持续 6 小时才再提醒；问题消失时推一条恢复通知；
 一切正常时完全静默。手动查看：
@@ -93,12 +103,12 @@ bash scripts/install-launchd.sh    # 装定时任务
 ```bash
 node scripts/health-check.js          # 退出码 0=健康 1=有问题
 node scripts/health-check.js --json
+hermes cron list                      # 两个 Hermes 定时任务的状态
 ```
 
-> 推送用的是 `~/.lark-cli/hermes/config.json` 里的飞书凭据（Mini 酱）。`lark-cli` 靠
-> `HERMES_HOME` 这个环境变量名选中该工作区，脚本里已经默认带上了，并且会主动清掉
-> 调用方环境里可能残留的 `OPENCLAW_HOME`——它优先级更高，会劫持回已退役的 openclaw 配置。
-> 两个变量都不设时，`lark-cli` 退回到另一个没登录的 app 并报「set valid app_id and app_secret」。
+> 推送用的是 `~/.lark-cli/hermes/config.json` 里的飞书凭据。`lark-cli` 靠 `HERMES_HOME`
+> 这个环境变量选中该工作区，脚本里已经默认带上；不设的话它会退回另一个没登录的 app，
+> 报「set valid app_id and app_secret」。
 
 ## 日常维护：基本不需要
 
@@ -108,12 +118,14 @@ node scripts/health-check.js --json
 
 ```bash
 corepack yarn relogin:cn 1          # 账号1：直接账号密码登录
+corepack yarn relogin:check         # 账号2 预检：浏览器、国区登录页、163 邮箱，不发验证码
 corepack yarn relogin:account2      # 账号2：开浏览器登录 + 自动读 163 邮箱验证码
 ```
 
-账号2 那条会弹出一个浏览器窗口，全程自动，约 1~5 分钟。跑之前确认 `.env` 里的
-`MAIL_IMAP_PASSWORD` 是有效的 163 **授权码**（不是登录密码）——它会因为改密码或
-长期不用被吊销，这是「一年后真要用时才发现坏了」的经典陷阱。
+账号2 那条会弹出一个浏览器窗口，全程自动，约 1~5 分钟。`.env` 里的 `MAIL_IMAP_PASSWORD`
+必须是有效的 163 **授权码**（不是登录密码）——它会因为改密码或长期不用被吊销，这是「一年后
+真要用时才发现坏了」的经典陷阱。`relogin:check` 不提交任何凭据，也不会触发验证码邮件，平时
+随时可以跑，确认这条重新登录的链路还是通的。
 
 ### ② 国际区 token 失效（约一年一次）
 
@@ -154,6 +166,7 @@ src/
 ├─ accounts.ts                 两个账号的配置（从 .env 读）
 ├─ relogin_cn.ts               国区账号密码重新登录（账号1）
 ├─ relogin_account2.ts         账号2 国区重新登录（Playwright + 163 取码）
+├─ check_relogin.ts            账号2 重新登录预检（不提交凭据、不发验证码）
 ├─ export_garmin_global_session.ts  国际区铸票导出 token
 ├─ import_global_token.ts      把铸好的国际区 token 落库
 ├─ service/
@@ -169,6 +182,7 @@ src/
 scripts/
 ├─ run-sync.sh                 launchd 包装：互斥锁、超时、日志
 ├─ install-launchd.sh          安装/卸载定时任务
+├─ health-check.js             健康检查 + 飞书告警
 └─ sync-report.js              每日简报统计
 ```
 
@@ -192,6 +206,11 @@ scripts/
   要按关键词就近匹配并过滤噪声（`mail_code_fetcher.ts` 已处理）。
 - **163 IMAP 要求客户端发送 IMAP ID**（RFC 2971），否则报 `Unsafe Login`；用的是**授权码**
   而不是登录密码。两个坑代码里都已覆盖。
+- **Playwright 浏览器放在全机共享的 `~/Library/Caches/ms-playwright`**，按「有没有项目登记
+  在用」保留：任何项目运行 `playwright install` 时，都会删掉没有项目登记在用的版本。本项目的
+  登记跟仓库路径绑定，挪过仓库又没在新位置重新 `corepack yarn install` 的话，账号2 重新登录
+  要用的浏览器迟早会被别的项目清掉。`postinstall` 会自动重新下载并登记，健康检查也会在
+  浏览器缺失时告警。
 - **OAuth1 约 1 年有效，OAuth2 短效可自动刷新**——所有登录难题一年只需要解决一次。
 
 ## 致谢与许可

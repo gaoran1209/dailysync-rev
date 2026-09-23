@@ -3,10 +3,9 @@
  * 每日简报 · 运动数据同步模块
  *
  * 统计过去 N 小时（默认 24）两个佳明账号「国区 → 国际区」各同步了多少条活动，
- * 供 openclaw「每日简报推送」调用。
+ * 供 Hermes 定时任务「每日简报推送」调用。
  *
  * 数据源：~/.dailysync/logs/sync-*.log 里 src/sync.ts 打的 [SYNC-RESULT] {...} 行。
- * （以前是去扒 GitHub Actions 的日志，同步搬回本机之后改成读本地日志，不再依赖 gh。）
  *
  * 用法：
  *   node scripts/sync-report.js            # 过去 24 小时，输出中文文本

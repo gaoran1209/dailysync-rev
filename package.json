@@ -4,10 +4,12 @@
   "description": "把两个佳明国区账号的运动活动定时同步到各自的国际区账号（本机 launchd 运行）",
   "main": "dist/sync.js",
   "scripts": {
+    "postinstall": "playwright install chromium",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "sync": "node dist/sync.js",
     "relogin:account2": "node dist/relogin_account2.js",
+    "relogin:check": "node dist/check_relogin.js",
     "relogin:cn": "node dist/relogin_cn.js",
     "export:global-token": "node dist/export_garmin_global_session.js",
     "import:global-token": "node dist/import_global_token.js",
